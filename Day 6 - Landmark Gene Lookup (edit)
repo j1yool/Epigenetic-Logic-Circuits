@@ -1,0 +1,209 @@
+"""
+block1b_add_gene_symbols.py
+Extracts gene_id -> gene_name from Ensembl GTF.
+Merges symbols into gate_assignments.tsv.
+Saves gate_assignments_named.tsv.
+Reruns landmark lookup against the named file.
+
+Run from: C:\\Users\\jamoo\\Downloads\\LOGIC CIRCUITS\\
+"""
+
+import os
+import sys
+import re
+import pandas as pd
+
+# ── paths ──────────────────────────────────────────────────────────────────────
+BASE_DIR    = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+GTF_FILE    = os.path.join(BASE_DIR, "data", "Homo_sapiens.GRCh38.109.gtf")
+GATE_FILE   = os.path.join(BASE_DIR, "data", "gate_assignments.tsv")
+OUT_NAMED   = os.path.join(BASE_DIR, "data", "gate_assignments_named.tsv")
+OUT_REPORT  = os.path.join(BASE_DIR, "block1b_landmark_report.txt")
+
+# ── landmark definitions ───────────────────────────────────────────────────────
+LANDMARKS = {
+    "BIVALENT":   ["HOXA1", "HOXA5", "HOXA9", "HOXA10", "HOXB4", "PAX5", "GATA2"],
+    "SIMPLE_AND": ["GAPDH", "ACTB", "B2M", "HPRT1", "RPL13A"],
+    "REPRESSED":  ["CDH1", "HBB"],
+    "NULL":       ["OR4F5", "OR4F29"],
+}
+
+# ── check files ────────────────────────────────────────────────────────────────
+for path, label in [(GTF_FILE, "GTF"), (GATE_FILE, "gate_assignments.tsv")]:
+    if not os.path.isfile(path):
+        sys.exit(f"ERROR: Cannot find {label} at:\n  {path}")
+
+# ── parse GTF for gene_id -> gene_name ────────────────────────────────────────
+print("Parsing GTF for gene symbols (this takes ~30 seconds)...")
+
+id_to_name = {}
+gene_id_re   = re.compile(r'gene_id "([^"]+)"')
+gene_name_re = re.compile(r'gene_name "([^"]+)"')
+
+with open(GTF_FILE, "r", encoding="utf-8") as fh:
+    for line in fh:
+        if line.startswith("#"):
+            continue
+        # Only need gene-level lines to keep it fast; fall back to all lines
+        fields = line.split("\t")
+        if len(fields) < 9:
+            continue
+        if fields[2] != "gene":
+            continue
+        attr = fields[8]
+        id_match   = gene_id_re.search(attr)
+        name_match = gene_name_re.search(attr)
+        if id_match and name_match:
+            ensembl_id = id_match.group(1).split(".")[0]   # strip version suffix
+            gene_name  = name_match.group(1)
+            id_to_name[ensembl_id] = gene_name
+
+print(f"  Parsed {len(id_to_name):,} gene_id -> gene_name mappings from GTF.")
+
+if len(id_to_name) == 0:
+    sys.exit(
+        "ERROR: No mappings extracted from GTF.\n"
+        "Check that the GTF is unzipped and is the correct file."
+    )
+
+# ── load gate assignments ──────────────────────────────────────────────────────
+gates = pd.read_csv(GATE_FILE, sep="\t")
+gates.columns = [c.strip().lower() for c in gates.columns]
+
+# Find gene ID column
+gene_col = None
+for candidate in ["gene_id", "gene_name", "gene", "symbol"]:
+    if candidate in gates.columns:
+        # Verify it actually contains Ensembl IDs
+        sample = gates[candidate].dropna().head(5).tolist()
+        if any(str(v).startswith("ENSG") for v in sample):
+            gene_col = candidate
+            break
+        # If it doesn't look like Ensembl IDs, keep searching
+if gene_col is None:
+    # Last resort: check first column
+    first = gates.columns[0]
+    sample = gates[first].dropna().head(5).tolist()
+    if any(str(v).startswith("ENSG") for v in sample):
+        gene_col = first
+    else:
+        sys.exit(
+            f"ERROR: Cannot find Ensembl ID column in gate_assignments.tsv.\n"
+            f"Columns: {list(gates.columns)}\n"
+            f"Sample values from first column: {sample}"
+        )
+
+print(f"  Using '{gene_col}' as Ensembl ID column in gate_assignments.tsv.")
+
+# Strip version suffixes from gate assignments too (ENSG00000000003.1 -> ENSG00000000003)
+gates["_ensembl_clean"] = gates[gene_col].astype(str).str.split(".").str[0]
+
+# Map to gene symbols
+gates["gene_name"] = gates["_ensembl_clean"].map(id_to_name)
+
+mapped   = gates["gene_name"].notna().sum()
+unmapped = gates["gene_name"].isna().sum()
+print(f"  Mapped   : {mapped:,} genes have a symbol")
+print(f"  Unmapped : {unmapped:,} genes (no symbol in GTF — normal for some Ensembl IDs)")
+
+if mapped == 0:
+    sys.exit(
+        "ERROR: Zero genes mapped to symbols.\n"
+        "The Ensembl IDs in gate_assignments.tsv do not match those in the GTF.\n"
+        f"  Gate sample IDs : {gates[gene_col].head(3).tolist()}\n"
+        f"  GTF sample IDs  : {list(id_to_name.keys())[:3]}"
+    )
+
+# ── save named file ────────────────────────────────────────────────────────────
+gates_out = gates.drop(columns=["_ensembl_clean"])
+gates_out.to_csv(OUT_NAMED, sep="\t", index=False)
+print(f"\nSaved: {OUT_NAMED}")
+
+# ── landmark lookup ────────────────────────────────────────────────────────────
+# Find gate and complexity columns
+gate_col = None
+for c in ["gate", "gate_type", "gate_call"]:
+    if c in gates_out.columns:
+        gate_col = c
+        break
+if gate_col is None:
+    sys.exit(f"ERROR: No gate column found. Columns: {list(gates_out.columns)}")
+
+complexity_col = None
+for c in ["complexity", "complexity_score", "complexity score"]:
+    if c in gates_out.columns:
+        complexity_col = c
+        break
+
+gates_out["_symbol_upper"] = gates_out["gene_name"].str.upper().fillna("")
+
+lines = []
+lines.append("=" * 72)
+lines.append("LANDMARK GENE LOOKUP — gate_assignments_named.tsv")
+lines.append("=" * 72)
+lines.append("")
+
+records = []
+
+for expected_gate, genes in LANDMARKS.items():
+    lines.append(f"  Expected: {expected_gate}")
+    lines.append(f"  {'GENE':<12}  {'EXPECTED':<14}  {'ACTUAL':<22}  {'COMPLEXITY':>11}  RESULT")
+    lines.append("  " + "-" * 68)
+
+    for gene in genes:
+        row = gates_out[gates_out["_symbol_upper"] == gene.upper()]
+        if row.empty:
+            lines.append(f"  {gene:<12}  {expected_gate:<14}  {'NOT FOUND':<22}  {'N/A':>11}  ⚠ MISSING")
+            records.append((gene, expected_gate, "NOT FOUND", None, "MISSING"))
+            continue
+        actual = str(row.iloc[0][gate_col])
+        compl  = row.iloc[0][complexity_col] if complexity_col else float("nan")
+        passed = actual.upper() == expected_gate.upper()
+        result = "✓ PASS" if passed else "✗ FAIL"
+        lines.append(f"  {gene:<12}  {expected_gate:<14}  {actual:<22}  {compl:>11.4f}  {result}")
+        records.append((gene, expected_gate, actual, compl, result))
+
+    lines.append("")
+
+found   = [r for r in records if r[4] != "MISSING"]
+passed  = [r for r in found   if "PASS" in r[4]]
+missing = [r for r in records if r[4] == "MISSING"]
+accuracy = len(passed) / len(found) * 100 if found else 0.0
+threshold_met = accuracy >= 70.0
+
+lines.append("-" * 72)
+lines.append(f"  Genes queried : {len(records)}")
+lines.append(f"  Found         : {len(found)}")
+lines.append(f"  PASS          : {len(passed)}")
+lines.append(f"  FAIL          : {len(found) - len(passed)}")
+lines.append(f"  MISSING       : {len(missing)}")
+lines.append(f"  Accuracy      : {accuracy:.1f}%")
+lines.append(f"  70% threshold : {'✓ MET — proceed to AML data' if threshold_met else '✗ NOT MET — review failed landmarks below'}")
+lines.append("")
+
+if missing:
+    lines.append(f"  Still missing after symbol mapping: {', '.join(r[0] for r in missing)}")
+    lines.append("  These genes may use alternate symbols in Ensembl GRCh38.109.")
+    lines.append("  Common alternates: ACTB→ACTB, B2M→B2M, HPRT1→HPRT1 (should resolve).")
+    lines.append("")
+
+if not threshold_met:
+    lines.append("DIAGNOSTIC HINTS (failed landmarks):")
+    for gene, exp, act, _, res in found:
+        if "FAIL" in res:
+            if exp == "BIVALENT" and "AND" in act.upper():
+                lines.append(f"  {gene}: got {act} → H3K27me3 threshold too low; raise it.")
+            elif exp == "SIMPLE_AND":
+                lines.append(f"  {gene}: got {act} → check TSS ± window in peak assignment.")
+            elif exp == "REPRESSED":
+                lines.append(f"  {gene}: got {act} → verify H3K27me3/H3K9me3 signal at locus.")
+            elif exp == "NULL":
+                lines.append(f"  {gene}: got {act} → olfactory locus may have spurious peaks.")
+    lines.append("")
+
+output = "\n".join(lines)
+print("\n" + output)
+
+with open(OUT_REPORT, "w", encoding="utf-8") as fh:
+    fh.write(output)
+print(f"Report saved: {OUT_REPORT}")

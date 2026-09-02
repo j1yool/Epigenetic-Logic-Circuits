@@ -1,0 +1,12 @@
+import pandas as pd
+
+gm = pd.read_csv(r'data\gate_assignments_named.tsv', sep='\t')
+k5 = pd.read_csv(r'data\k562\k562_gate_assignments_named.tsv', sep='\t')
+
+print("=== GM12878 gate distribution ===")
+print(gm['gate_type'].value_counts(normalize=True).round(3))
+print("\n=== K562 gate distribution ===")
+print(k5['gate_type'].value_counts(normalize=True).round(3))
+print("\n=== Absolute counts ===")
+print(pd.DataFrame({'GM12878': gm['gate_type'].value_counts(),
+                    'K562': k5['gate_type'].value_counts()}))

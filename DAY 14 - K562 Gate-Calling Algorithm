@@ -1,0 +1,78 @@
+import pandas as pd
+
+def call_gate(row):
+    active = row.get('H3K4me3', 0)
+    enhancer = row.get('H3K27ac', 0)
+    poised = row.get('H3K4me1', 0)
+    repressive1 = row.get('H3K27me3', 0)
+    repressive2 = row.get('H3K9me3', 0)
+    expressed = row.get('expressed', 0)
+
+    any_active = active or enhancer
+    any_repressive = repressive1 or repressive2
+    active_count = active + enhancer + poised
+    repressive_count = repressive1 + repressive2
+
+    if not any_active and not any_repressive:
+        return 'NULL'
+    if active and repressive1:
+        return 'BIVALENT'
+    if any_repressive and not any_active:
+        return 'REPRESSED'
+    if poised and not any_active and not any_repressive:
+        return 'POISED'
+    if active and enhancer and not any_repressive:
+        if expressed:
+            return 'SIMPLE_AND'
+        else:
+            return 'INCONSISTENT'
+    if (active or enhancer) and not (active and enhancer) and not any_repressive:
+        if expressed:
+            return 'SIMPLE_OR'
+        else:
+            return 'INCONSISTENT'
+    if active_count + repressive_count >= 3:
+        return 'COMPLEX'
+    if expressed and not any_active:
+        return 'INCONSISTENT'
+    return 'COMPLEX'
+
+
+def compute_complexity_score(row):
+    active = row.get('H3K4me3', 0) + row.get('H3K27ac', 0)
+    repressive = row.get('H3K27me3', 0) + row.get('H3K9me3', 0)
+    bivalent_conflict = 1 if (row.get('H3K4me3', 0) and row.get('H3K27me3', 0)) else 0
+    gate = call_gate(row)
+    clean_logic = 1 if gate in ('SIMPLE_AND', 'SIMPLE_OR', 'REPRESSED', 'NULL') else 0
+    return active + (2 * repressive) + bivalent_conflict - clean_logic
+
+
+def classify_all_genes(binary_df):
+    gates = binary_df.apply(call_gate, axis=1)
+    scores = binary_df.apply(compute_complexity_score, axis=1)
+    return gates, scores
+
+
+if __name__ == "__main__":
+    df = pd.read_csv(
+    r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\k562\k562_binary_matrix.csv",
+    index_col=0
+)
+    mark_cols = ['H3K4me3','H3K27ac','H3K4me1','H3K27me3','H3K9me3']
+    df[mark_cols] = df[mark_cols].fillna(0)
+    gates, scores = classify_all_genes(df)
+
+    results = pd.DataFrame({
+        'gene_id': df.index,
+        'gate_type': gates.values,
+        'complexity_score': scores.values
+    })
+
+    print("Gate distribution:")
+    print(results['gate_type'].value_counts())
+    print("\nMean complexity by gate type:")
+    print(results.groupby('gate_type')['complexity_score'].mean().sort_values())
+
+    out_path = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\k562\k562_gate_assignments_named.tsv"
+    results.to_csv(out_path, sep='\t', index=False)
+    print(f"\nSaved to {out_path}")

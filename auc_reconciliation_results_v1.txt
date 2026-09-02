@@ -1,0 +1,78 @@
+======================================================================
+AUC RECONCILIATION RESULTS v1 — Project VII (Epigenetic Logic Circuits)
+======================================================================
+
+Source script : block5_auc_comparison_both_lines.py
+Rerun date    : 2026-08-06
+Solver        : liblinear (confirmed correct; supersedes Day-6 GM12878-only
+                script's solver="lbfgs" bug)
+Scope         : GM12878 + K562, both cell lines
+Thread env    : OMP_NUM_THREADS / MKL_NUM_THREADS / OPENBLAS_NUM_THREADS
+                confirmed set to "1" before any numeric imports (lines 17-19)
+
+----------------------------------------------------------------------
+RERUN OUTPUT (raw, as printed by script)
+----------------------------------------------------------------------
+GM12878:
+  Merged           : 56,625 / 56,625 genes
+  Dropped (NaN)    : 34,163 rows -> 22,462 clean genes
+  Train / Test     : 17,969 / 4,493
+  Expressed (test) : 54.8%
+  Model 1 (individual marks)  AUC = 0.7974
+  Model 2 (gate type)         AUC = 0.9864
+  Model 3 (complexity score)  AUC = 0.6836
+  Gate AUC - Marks AUC = +0.1890
+
+K562:
+  Merged           : 62,710 / 62,710 genes
+  Dropped (NaN)    : 39,569 rows -> 23,141 clean genes
+  Train / Test     : 18,512 / 4,629
+  Expressed (test) : 30.3%
+  Model 1 (individual marks)  AUC = 0.7535
+  Model 2 (gate type)         AUC = 0.9986
+  Model 3 (complexity score)  AUC = 0.7635
+  Gate AUC - Marks AUC = +0.2452
+
+----------------------------------------------------------------------
+COMPARISON AGAINST LOCKED BENCHMARKS
+----------------------------------------------------------------------
+Tolerance reference point: 0.0021 (from previously logged 0.7974 -> 0.7953
+divergence margin). Deltas at or below this magnitude are not flagged as
+divergences; deltas above it are.
+
+  Metric                    Rerun     Locked    Delta      Status
+  -----------------------   -------   -------   --------   ---------
+  GM12878 gate-type          0.9864    0.9864    +0.0000   MATCH
+  K562    gate-type          0.9986    0.9986    +0.0000   MATCH
+  GM12878 marks-only         0.7974    0.7974    +0.0000   MATCH
+  K562    marks-only         0.7535    0.7531*   +0.0004   MATCH (within tolerance)
+
+* [UNRESOLVED] Locked-value ambiguity, K562 marks-only:
+  This reconciliation task specified 0.7531 as the locked benchmark.
+  However, prior audit work on file (switching-gene delta table review)
+  identified 0.7531 as the CSV-measured value that had been substituted
+  for the true locked benchmark of 0.7535 without an inline HTML comment
+  flag -- and that substitution was subsequently corrected. If 0.7535 is
+  the correct locked value, this rerun is a fourth exact match (Delta =
+  0.0000), not a divergence.
+
+  This document does not resolve which figure (0.7531 or 0.7535) is
+  authoritative. Per the supersede-don't-overwrite / no-silent-revision
+  convention, that determination should be made by checking the locked
+  value currently recorded in MASTER_STATUS.md before this rerun's
+  numbers are used anywhere downstream.
+
+----------------------------------------------------------------------
+VERDICT
+----------------------------------------------------------------------
+All four rerun values are consistent with the locked benchmarks, either
+exactly (3 of 4, unambiguous) or well within the established tolerance
+margin (4th, pending resolution of the locked-value ambiguity above).
+No divergence exceeding the 0.0021 tolerance reference was observed
+under either reading of the K562 marks-only benchmark.
+
+No action taken on MASTER_STATUS.md. Per instruction, locked values are
+not to be updated until this rerun is fully reconciled with the
+call_gate() structural-determinism issue.
+
+======================================================================

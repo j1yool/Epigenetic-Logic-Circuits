@@ -1,0 +1,19 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import pandas as pd 
+
+gm = pd.read_csv("data/gate_assignments_named.tsv", sep="\t")
+k562 = pd.read_csv("data/k562/k562_gate_assignments_named.tsv", sep="\t")
+
+print("GM12878 gate-type proportions:")
+print(gm["gate_type"].value_counts(normalize=True).round(3))
+print("\nK562 gate-type proportions:")
+print(k562["gate_type"].value_counts(normalize=True).round(3))
+
+print("\nGM12878 gate-type counts (n):")
+print(gm["gate_type"].value_counts())
+print("\nK562 gate-type counts (n):")
+print(k562["gate_type"].value_counts())

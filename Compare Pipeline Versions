@@ -1,0 +1,184 @@
+"""
+compare_pipeline_versions.py
+Day 28 — Epigenetic Logic Circuits
+Purpose: Diagnose the AUC model-definition mismatch between the locked
+benchmark run (GM12878 gate-type AUC=0.9864, K562=0.9986) and the
+divergent rerun. Diagnosis only.
+
+Real files, confirmed from directory listing:
+  GM12878: data\gate_assignments_named.tsv, data\binary_matrix.csv
+  K562:    data\k562\k562_gate_assignments_named.tsv, data\k562\k562_binary_matrix.csv
+  Existing AUC output: data\auc_stats_summary.csv (already-computed values -- read
+    this first, it may already tell you which run each locked number came from)
+"""
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import pandas as pd
+import numpy as np
+import glob
+import re
+
+PROJECT_ROOT = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+
+GM12878_MATRIX = os.path.join(PROJECT_ROOT, "data", "binary_matrix.csv")
+GM12878_GATES = os.path.join(PROJECT_ROOT, "data", "gate_assignments_named.tsv")
+K562_MATRIX = os.path.join(PROJECT_ROOT, "data", "k562", "k562_binary_matrix.csv")
+K562_GATES = os.path.join(PROJECT_ROOT, "data", "k562", "k562_gate_assignments_named.tsv")
+AUC_SUMMARY = os.path.join(PROJECT_ROOT, "data", "auc_stats_summary.csv")
+
+MARK_COLUMNS = ["H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"]
+GATE_DUMMY_PREFIX = "gate_type_"
+
+# =====================================================================
+# SECTION 0: READ THE EXISTING AUC SUMMARY FIRST
+# This file already exists (written 7/17) -- before comparing raw
+# matrices, see what it already recorded. It may directly show which
+# run/config produced which AUC value, which narrows the search.
+# =====================================================================
+
+print("=" * 78)
+print("SECTION 0: Existing auc_stats_summary.csv contents")
+print("=" * 78)
+
+if os.path.exists(AUC_SUMMARY):
+    df_auc = pd.read_csv(AUC_SUMMARY)
+    print(df_auc.to_string(index=False))
+else:
+    print(f"[MISSING] {AUC_SUMMARY} not found.")
+
+# =====================================================================
+# SECTION 1: LOAD GM12878 AND K562 MATRICES
+# =====================================================================
+
+def load_csv(path, label):
+    if not os.path.exists(path):
+        print(f"[MISSING] {label}: {path}")
+        return None
+    df = pd.read_csv(path, sep="\t" if path.endswith(".tsv") else ",")
+    print(f"\nLoaded {label}: {path}  shape={df.shape}")
+    print(f"  columns: {list(df.columns)}")
+    return df
+
+print("\n" + "=" * 78)
+print("SECTION 1: Loading GM12878 and K562 files")
+print("=" * 78)
+
+gm_matrix = load_csv(GM12878_MATRIX, "GM12878 binary_matrix.csv")
+gm_gates = load_csv(GM12878_GATES, "GM12878 gate_assignments_named.tsv")
+k562_matrix = load_csv(K562_MATRIX, "K562 k562_binary_matrix.csv")
+k562_gates = load_csv(K562_GATES, "K562 k562_gate_assignments_named.tsv")
+
+# =====================================================================
+# SECTION 2: describe()/nunique() -- GM12878 vs K562, and matrix vs gates file
+# Since "locked" vs "divergent" isn't a separate pair of files but
+# (most likely) two DIFFERENT SCRIPTS run against the SAME underlying
+# data, this section profiles what's actually on disk so you can see
+# if binary_matrix.csv and gate_assignments_named.tsv are even
+# consistent with each other (e.g. same gene set, same row count)
+# before looking at the scripts themselves in Section 3.
+# =====================================================================
+
+print("\n" + "=" * 78)
+print("SECTION 2: Cross-file consistency check")
+print("=" * 78)
+
+def profile_pair(matrix_df, gates_df, label):
+    if matrix_df is None or gates_df is None:
+        print(f"\n{label}: cannot profile, one or both files missing.")
+        return
+    print(f"\n{label}:")
+    print(f"  matrix rows={len(matrix_df)}  gates rows={len(gates_df)}  "
+          f"row count match: {len(matrix_df) == len(gates_df)}")
+
+    for col in MARK_COLUMNS:
+        if col in matrix_df.columns:
+            print(f"  matrix[{col}] nunique={matrix_df[col].nunique()} "
+                  f"dtype={matrix_df[col].dtype} "
+                  f"values={sorted(matrix_df[col].dropna().unique())[:5]}")
+        else:
+            print(f"  [MISSING] '{col}' not in matrix columns")
+
+    gate_col_candidates = [c for c in gates_df.columns if "gate" in c.lower()]
+    print(f"  gate-type-like columns in gates file: {gate_col_candidates}")
+    for c in gate_col_candidates:
+        print(f"    {c}: nunique={gates_df[c].nunique()} values={gates_df[c].unique()[:10]}")
+
+    gate_dummy_cols = [c for c in matrix_df.columns if c.startswith(GATE_DUMMY_PREFIX)]
+    print(f"  gate-dummy columns present in MATRIX file: "
+          f"{gate_dummy_cols if gate_dummy_cols else 'none'}")
+    if gate_dummy_cols:
+        print(f"  [FLAG] If X_complex is built by slicing this matrix file directly, "
+              f"confirm the slice excludes {gate_dummy_cols} -- locked rule is "
+              f"marks + complexity only, no gate dummies.")
+
+profile_pair(gm_matrix, gm_gates, "GM12878")
+profile_pair(k562_matrix, k562_gates, "K562")
+
+# =====================================================================
+# SECTION 3: FIND THE ACTUAL TRAINING SCRIPTS (self-discovering)
+# scripts\ doesn't exist as a folder -- search the whole project tree
+# for any .py file that fits a LogisticRegression model on gate_type,
+# rather than guessing a path.
+# =====================================================================
+
+print("\n" + "=" * 78)
+print("SECTION 3: Locating training scripts and checking solver args")
+print("=" * 78)
+
+py_files = glob.glob(os.path.join(PROJECT_ROOT, "**", "*.py"), recursive=True)
+print(f"\nFound {len(py_files)} .py files under {PROJECT_ROOT}:")
+for f in py_files:
+    print(f"  {f}")
+
+print("\nScanning each for LogisticRegression(...) calls and solver args:")
+for f in py_files:
+    try:
+        with open(f, "r", errors="ignore") as fh:
+            content = fh.read()
+    except Exception as e:
+        print(f"  [ERROR reading {f}]: {e}")
+        continue
+
+    matches = re.findall(r"LogisticRegression\([^)]*\)", content)
+    if not matches:
+        continue
+
+    print(f"\n{f}:")
+    for m in matches:
+        has_solver = "solver=" in m
+        print(f"  {m}")
+        if not has_solver:
+            print(f"    [FLAG] No explicit solver specified -- sklearn defaults to "
+                  f"'lbfgs' unless this call is elsewhere overridden. If this is the "
+                  f"divergent-run script and the locked benchmark script explicitly "
+                  f"sets liblinear, THIS is the mismatch source.")
+        elif "liblinear" in m:
+            print(f"    -> explicit liblinear confirmed")
+        else:
+            solver_match = re.search(r"solver\s*=\s*['\"](\w+)['\"]", m)
+            print(f"    -> explicit solver found: {solver_match.group(1) if solver_match else 'unparsed'}")
+
+    # Also check this same file for how X_complex is constructed, if at all
+    if "X_complex" in content or "x_complex" in content:
+        complex_lines = [l for l in content.splitlines() if "complex" in l.lower() and "=" in l]
+        print(f"  X_complex-related lines in this file:")
+        for l in complex_lines[:10]:
+            print(f"    {l.strip()}")
+
+# =====================================================================
+# SECTION 4: EXPORT
+# =====================================================================
+
+out_path = os.path.join(PROJECT_ROOT, "data", "day28_pipeline_diagnostic.txt")
+print(f"\n\nRun complete. Copy this full console output into "
+      f"diagnostic_findings_day28.md (or save console output manually to "
+      f"{out_path}) -- this script prints rather than writes a CSV, since "
+      f"the real finding here is about SCRIPT CONFIGURATION, not just data "
+      f"column diffs.")
+print("Next: take whichever flags fired above (missing solver arg, gate-dummy "
+      "leakage into X_complex) and append that SPECIFIC finding to the existing "
+      "HTML comment in results_draft_v1.md. Do not update prose AUC numbers yet.")

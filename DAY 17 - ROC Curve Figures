@@ -1,0 +1,131 @@
+"""
+roc_curves_cross_cellline.py
+
+Generates overlaid ROC curves (marks-only vs gate-type feature sets) for
+GM12878 and K562, side by side, matching established AUC values:
+  GM12878: marks=0.7974, gate=0.9864
+  K562:    marks=0.7535, gate=0.9986
+
+Output: figures/roc_gm12878_k562_comparison.png (300 dpi)
+"""
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+
+BASE = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+GM_MATRIX_PATH = os.path.join(BASE, "data", "binary_matrix.csv")
+K562_MATRIX_PATH = os.path.join(BASE, "data", "k562", "k562_binary_matrix.csv")
+GATE_ASSIGN_PATH = os.path.join(BASE, "data", "gate_assignments_named.tsv")
+FIG_OUT = os.path.join(BASE, "figures", "roc_gm12878_k562_comparison.png")
+
+MARK_COLS = ["H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"]
+EXPRESSION_COL_CANDIDATES = ["expressed", "expression_binary", "is_expressed", "label"]
+GENE_ID_CANDIDATES = ["gene_id", "gene", "gene_name", "GeneID"]
+GATE_TYPE_COL_CANDIDATES = ["gate_type", "gate", "gate_call"]
+
+
+def find_col(df, candidates, required_desc):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise ValueError(
+        f"Could not find a column for {required_desc}. "
+        f"Tried {candidates}. Available columns: {list(df.columns)}"
+    )
+
+
+def load_and_prepare(matrix_path, gate_path, label):
+    df = pd.read_csv(matrix_path, index_col=0)
+    df.index.name = "gene_id"
+    df = df.reset_index()
+    gene_col = "gene_id"
+    expr_col = find_col(df, EXPRESSION_COL_CANDIDATES, f"expression label ({label} matrix)")
+
+    missing_marks = [m for m in MARK_COLS if m not in df.columns]
+    if missing_marks:
+        raise ValueError(f"{label}: missing mark columns {missing_marks} in {matrix_path}")
+
+    gates = pd.read_csv(gate_path, sep="\t")
+    gate_gene_col = find_col(gates, GENE_ID_CANDIDATES, f"gene identifier ({label} gate file)")
+    gate_type_col = find_col(gates, GATE_TYPE_COL_CANDIDATES, f"gate type ({label} gate file)")
+
+    merged = df.merge(
+        gates[[gate_gene_col, gate_type_col]],
+        left_on=gene_col, right_on=gate_gene_col, how="inner"
+    )
+    if merged.empty:
+        raise ValueError(
+            f"{label}: merge between matrix and gate assignments produced 0 rows. "
+            f"Check that '{gene_col}' and '{gate_gene_col}' use the same gene ID format."
+        )
+
+    gate_dummies = pd.get_dummies(merged[gate_type_col], prefix="gate")
+
+    y = merged[expr_col].astype(int).values
+    X_marks = merged[MARK_COLS].astype(float).values
+    X_gate = gate_dummies.astype(float).values
+
+    return X_marks, X_gate, y
+
+
+def fit_and_score(X, y):
+    model = LogisticRegression(solver="liblinear", max_iter=1000)
+    model.fit(X, y)
+    probs = model.predict_proba(X)[:, 1]
+    fpr, tpr, _ = roc_curve(y, probs)
+    roc_auc = auc(fpr, tpr)
+    return fpr, tpr, roc_auc
+
+
+def plot_panel(ax, fpr_marks, tpr_marks, auc_marks, fpr_gate, tpr_gate, auc_gate, title):
+    ax.plot(fpr_marks, tpr_marks, label=f"Marks-only (AUC = {auc_marks:.4f})", linewidth=2)
+    ax.plot(fpr_gate, tpr_gate, label=f"Gate-type (AUC = {auc_gate:.4f})", linewidth=2)
+    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=1, label="Chance")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title(title)
+    ax.legend(loc="lower right", fontsize=9)
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1.02])
+
+
+def main():
+    os.makedirs(os.path.dirname(FIG_OUT), exist_ok=True)
+
+    print("Loading GM12878...")
+    Xm_gm, Xg_gm, y_gm = load_and_prepare(GM_MATRIX_PATH, GATE_ASSIGN_PATH, "GM12878")
+    print("Loading K562...")
+    Xm_k5, Xg_k5, y_k5 = load_and_prepare(K562_MATRIX_PATH, GATE_ASSIGN_PATH, "K562")
+
+    fpr_m_gm, tpr_m_gm, auc_m_gm = fit_and_score(Xm_gm, y_gm)
+    fpr_g_gm, tpr_g_gm, auc_g_gm = fit_and_score(Xg_gm, y_gm)
+
+    fpr_m_k5, tpr_m_k5, auc_m_k5 = fit_and_score(Xm_k5, y_k5)
+    fpr_g_k5, tpr_g_k5, auc_g_k5 = fit_and_score(Xg_k5, y_k5)
+
+    print(f"GM12878 — marks AUC: {auc_m_gm:.4f} | gate AUC: {auc_g_gm:.4f}")
+    print(f"K562    — marks AUC: {auc_m_k5:.4f} | gate AUC: {auc_g_k5:.4f}")
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+    plot_panel(axes[0], fpr_m_gm, tpr_m_gm, auc_m_gm, fpr_g_gm, tpr_g_gm, auc_g_gm,
+               "GM12878: Marks vs Gate-Type")
+    plot_panel(axes[1], fpr_m_k5, tpr_m_k5, auc_m_k5, fpr_g_k5, tpr_g_k5, auc_g_k5,
+               "K562: Marks vs Gate-Type")
+
+    fig.suptitle("Gate-Type vs Marks-Only Expression Prediction: Cross-Cell-Line Comparison",
+                 fontsize=13)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(FIG_OUT, dpi=300)
+    print(f"Saved figure to {FIG_OUT}")
+
+
+if __name__ == "__main__":
+    main()

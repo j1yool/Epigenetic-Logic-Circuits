@@ -1,0 +1,141 @@
+"""
+Block 1 — Landmark Gene Lookup
+Reads gate_assignments.tsv and reports gate assignments for landmark genes.
+Run from: C:\\Users\\jamoo\\Downloads\\LOGIC CIRCUITS\\
+Output:   printed table + block1_landmark_lookup.txt
+"""
+
+import os
+import sys
+import pandas as pd
+
+# ── paths ─────────────────────────────────────────────────────────────────────
+BASE_DIR = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+GATE_FILE = os.path.join(BASE_DIR, "data", "gate_assignments.tsv")
+OUT_FILE  = os.path.join(BASE_DIR, "block1_landmark_lookup.txt")
+
+# ── landmark definitions ───────────────────────────────────────────────────────
+LANDMARKS = {
+    "BIVALENT":    ["HOXA1", "HOXA5", "HOXA9", "HOXA10", "HOXB4", "PAX5", "GATA2"],
+    "SIMPLE_AND":  ["GAPDH", "ACTB", "B2M", "HPRT1", "RPL13A"],
+    "REPRESSED":   ["CDH1", "HBB"],
+    "NULL":        ["OR4F5", "OR4F29"],
+}
+
+# ── load gate assignments ──────────────────────────────────────────────────────
+if not os.path.isfile(GATE_FILE):
+    sys.exit(f"ERROR: Cannot find {GATE_FILE}\nCheck that gate_assignments.tsv exists in your data/ folder.")
+
+df = pd.read_csv(GATE_FILE, sep="\t")
+
+# Normalise column names to lowercase for safety
+df.columns = [c.strip().lower() for c in df.columns]
+
+# Identify the gene-name column (handles gene_name, gene, gene_id variants)
+gene_col = None
+for candidate in ["gene_name", "gene", "gene_id", "symbol"]:
+    if candidate in df.columns:
+        gene_col = candidate
+        break
+if gene_col is None:
+    sys.exit(f"ERROR: Could not find a gene name column in {GATE_FILE}.\nColumns found: {list(df.columns)}")
+
+# Identify the gate column
+gate_col = None
+for candidate in ["gate", "gate_type", "gate_call"]:
+    if candidate in df.columns:
+        gate_col = candidate
+        break
+if gate_col is None:
+    sys.exit(f"ERROR: Could not find a gate column in {GATE_FILE}.\nColumns found: {list(df.columns)}")
+
+# Identify the complexity column (optional — no hard fail if absent)
+complexity_col = None
+for candidate in ["complexity", "complexity_score", "complexity score"]:
+    if candidate in df.columns:
+        complexity_col = candidate
+        break
+
+# Upper-case gene names for matching
+df["_gene_upper"] = df[gene_col].str.upper()
+
+# ── query ─────────────────────────────────────────────────────────────────────
+lines = []
+lines.append("=" * 70)
+lines.append("BLOCK 1 — LANDMARK GENE LOOKUP")
+lines.append("=" * 70)
+lines.append("")
+
+all_genes   = []   # list of (gene, expected_gate, actual_gate, complexity, pass_fail)
+found_count = 0
+missing     = []
+
+for expected_gate, genes in LANDMARKS.items():
+    lines.append(f"── Expected gate: {expected_gate} ──")
+    header = f"  {'GENE':<12}  {'EXPECTED':<14}  {'ACTUAL':<20}  {'COMPLEXITY':>10}  RESULT"
+    lines.append(header)
+    lines.append("  " + "-" * 68)
+
+    for gene in genes:
+        row = df[df["_gene_upper"] == gene.upper()]
+        if row.empty:
+            lines.append(f"  {gene:<12}  {expected_gate:<14}  {'NOT FOUND':<20}  {'N/A':>10}  ⚠ MISSING")
+            missing.append(gene)
+            all_genes.append((gene, expected_gate, "NOT FOUND", None, "MISSING"))
+            continue
+
+        actual = row.iloc[0][gate_col]
+        compl  = f"{row.iloc[0][complexity_col]:.3f}" if complexity_col else "N/A"
+        result = "✓ PASS" if str(actual).upper() == expected_gate.upper() else "✗ FAIL"
+        lines.append(f"  {gene:<12}  {expected_gate:<14}  {str(actual):<20}  {str(compl):>10}  {result}")
+        all_genes.append((gene, expected_gate, actual, compl, result))
+        found_count += 1
+
+    lines.append("")
+
+# ── accuracy summary ───────────────────────────────────────────────────────────
+total_found   = [g for g in all_genes if g[4] != "MISSING"]
+total_pass    = [g for g in total_found if "PASS" in g[4]]
+accuracy      = len(total_pass) / len(total_found) * 100 if total_found else 0
+threshold_met = accuracy >= 70
+
+lines.append("=" * 70)
+lines.append("LANDMARK ACCURACY SUMMARY")
+lines.append("=" * 70)
+lines.append(f"  Genes queried : {sum(len(v) for v in LANDMARKS.values())}")
+lines.append(f"  Found in TSV  : {len(total_found)}")
+lines.append(f"  PASS          : {len(total_pass)}")
+lines.append(f"  FAIL          : {len(total_found) - len(total_pass)}")
+lines.append(f"  MISSING       : {len(missing)}")
+lines.append(f"  Accuracy      : {accuracy:.1f}%")
+lines.append(f"  70% threshold : {'MET ✓ — proceed to AML data' if threshold_met else 'NOT MET ✗ — adjust thresholds before proceeding'}")
+
+if missing:
+    lines.append("")
+    lines.append(f"  Missing genes (not in gate_assignments.tsv): {', '.join(missing)}")
+    lines.append("  These may be named differently in Ensembl annotation.")
+    lines.append("  Check the TSV manually for alternate names (e.g. ACTB vs ACTB.1).")
+
+lines.append("")
+
+if not threshold_met:
+    lines.append("DIAGNOSTIC HINTS:")
+    fail_list = [g for g in total_found if "FAIL" in g[4]]
+    for gene, expected, actual, compl, _ in fail_list:
+        if expected == "BIVALENT" and "AND" in str(actual).upper():
+            lines.append(f"  {gene}: got {actual} instead of BIVALENT → H3K27me3 threshold may be too low.")
+        elif expected == "SIMPLE_AND" and actual != "SIMPLE_AND":
+            lines.append(f"  {gene}: got {actual} instead of SIMPLE_AND → check peak-to-gene assignment at TSS ± window.")
+        elif expected == "NULL" and actual != "NULL":
+            lines.append(f"  {gene}: got {actual} instead of NULL → check that no marks leak into olfactory receptor loci.")
+        elif expected == "REPRESSED" and actual != "REPRESSED":
+            lines.append(f"  {gene}: got {actual} instead of REPRESSED → H3K27me3 or H3K9me3 not being picked up.")
+
+# ── print + write ─────────────────────────────────────────────────────────────
+output = "\n".join(lines)
+print(output)
+
+with open(OUT_FILE, "w", encoding="utf-8") as fh:
+    fh.write(output)
+
+print(f"\nSaved to: {OUT_FILE}")

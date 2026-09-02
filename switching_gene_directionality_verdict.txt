@@ -1,0 +1,62 @@
+=== Switching-Gene Directionality Verdict ===
+
+--- Sanity check: genome_wide_auc vs. locked MASTER_STATUS.md benchmarks ---
+('GM12878', 'gate_type'): locked=0.9864, csv=0.9864, diff=0.0000 [OK]
+('GM12878', 'marks_only'): locked=0.7974, csv=0.7974, diff=0.0000 [OK]
+('K562', 'gate_type'): locked=0.9986, csv=0.9986, diff=0.0000 [OK]
+('K562', 'marks_only'): locked=0.7531, csv=0.7535, diff=0.0004 [OK]
+
+--- Marks-only model: subset_auc vs. genome_wide_auc, by cell line ---
+cell_line  subset_auc  genome_wide_auc   delta
+  GM12878      0.8526           0.7974  0.0552
+     K562      0.6096           0.7535 -0.1439
+
+Signs: {'GM12878': 'positive', 'K562': 'negative'}
+Direction consistent across cell lines: False
+
+--- Gate-type model: subset_auc vs. genome_wide_auc, by cell line (context only) ---
+cell_line  subset_auc  genome_wide_auc   delta
+  GM12878      0.9753           0.9864 -0.0111
+     K562      0.9957           0.9986 -0.0029
+
+--- switch_direction distribution (switching_genes_v1.tsv) ---
+switch_direction
+AND→INC    3502
+BIV→INC     747
+REP→INC     550
+OR→INC      365
+REP→BIV     266
+CPX→INC     249
+INC→REP     192
+INC→AND     188
+CPX→AND     184
+BIV→AND     171
+AND→BIV     139
+OR→AND      137
+INC→BIV     131
+AND→CPX     126
+AND→REP      91
+BIV→REP      87
+REP→AND      59
+AND→OR       48
+OR→REP       45
+OR→BIV       41
+INC→CPX      40
+CPX→REP      25
+REP→CPX      17
+INC→OR       17
+REP→OR       15
+BIV→OR       13
+CPX→BIV      12
+OR→CPX        6
+BIV→CPX       6
+CPX→OR        5
+
+Interpretive note: if one switch_direction category (e.g. AND→INC) dominates the subset, an asymmetric shift toward INCONSISTENT-type calls in one cell line could mechanically explain a marks-only AUC drop in that cell line specifically, independent of any remaining model artifact.
+
+--- Prior provisional doc (~Day 25) for before/after comparison ---
+NOT FOUND at C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_gene_validation_interpretation_v1.md — no prior text to compare against.
+
+=== VERDICT ===
+genome_wide_auc confirmed to match locked benchmarks (within rounding).
+Delta sign is INCONSISTENT across cell lines post-reconciliation (GM12878 delta=+0.0552, K562 delta=-0.1439). This survives the reconciliation and is a REAL finding, not a fixed artifact. It belongs in the Discussion section: switching genes are more marks-predictable than the genome-wide baseline in GM12878, but less marks-predictable than the genome-wide baseline in K562 — an asymmetry that itself may be biologically meaningful (e.g., different regulatory logic mechanisms per cell-line context) rather than noise.

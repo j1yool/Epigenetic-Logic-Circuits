@@ -1,0 +1,90 @@
+========================================================================
+PART A — LANDMARK VALIDATION TABLE
+========================================================================
+
+  Expected: BIVALENT
+  GENE          EXPECTED        ACTUAL                   COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  HOXA1         BIVALENT        INCONSISTENT                 1.0000  ✗ FAIL
+  HOXA5         BIVALENT        nan                         -1.0000  ✗ FAIL
+  HOXA9         BIVALENT        REPRESSED                    1.0000  ✗ FAIL
+  HOXA10        BIVALENT        REPRESSED                    3.0000  ✗ FAIL
+  HOXB4         BIVALENT        SIMPLE_AND                   1.0000  ✗ FAIL
+  PAX5          BIVALENT        SIMPLE_AND                   1.0000  ✗ FAIL
+  GATA2         BIVALENT        REPRESSED                    1.0000  ✗ FAIL
+
+  Expected: SIMPLE_AND
+  GENE          EXPECTED        ACTUAL                   COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  GAPDH         SIMPLE_AND      SIMPLE_AND                   1.0000  ✓ PASS
+  ACTB          SIMPLE_AND      SIMPLE_OR                    0.0000  ✗ FAIL
+  B2M           SIMPLE_AND      SIMPLE_AND                   1.0000  ✓ PASS
+  HPRT1         SIMPLE_AND      SIMPLE_AND                   1.0000  ✓ PASS
+  RPL13A        SIMPLE_AND      SIMPLE_AND                   1.0000  ✓ PASS
+
+  Expected: REPRESSED
+  GENE          EXPECTED        ACTUAL                   COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  CDH1          REPRESSED       SIMPLE_OR                    0.0000  ✗ FAIL
+  HBB           REPRESSED       nan                         -1.0000  ✗ FAIL
+
+  Expected: NULL
+  GENE          EXPECTED        ACTUAL                   COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  OR4F5         NULL            nan                         -1.0000  ✗ FAIL
+  OR4F29        NULL            NOT FOUND                       N/A  ⚠ MISSING
+
+------------------------------------------------------------------------
+  Genes queried : 16
+  Found         : 15
+  PASS          : 4
+  FAIL          : 11
+  MISSING       : 1
+  Accuracy      : 26.7%
+  70% threshold : ✗ NOT MET — adjust thresholds
+
+  Missing genes: OR4F29
+  Check TSV for alternate gene symbols.
+
+DIAGNOSTIC HINTS (failed landmarks):
+  HOXB4: got SIMPLE_AND not BIVALENT → raise H3K27me3 threshold.
+  PAX5: got SIMPLE_AND not BIVALENT → raise H3K27me3 threshold.
+  ACTB: got SIMPLE_OR not SIMPLE_AND → check TSS peak-assignment window.
+  CDH1: got SIMPLE_OR not REPRESSED → verify H3K27me3 / H3K9me3 coverage.
+  HBB: got nan not REPRESSED → verify H3K27me3 / H3K9me3 coverage.
+  OR4F5: got nan not NULL → olfactory locus may have spurious peaks.
+
+========================================================================
+PART B — POPULATION-LEVEL SANITY CHECKS
+========================================================================
+
+CHECK 1: Mean expression (TPM) by gate type
+  ⚠ No expression column found in gate_assignments.tsv.
+  Columns present: gene_id, gate_type, complexity_score, gene_id_clean, gene_name, _gene_upper
+  Skipping expression-based checks.
+  → If you have a separate TPM file, merge it by gene_name and rerun.
+
+CHECK 2: SIMPLE_AND vs REPRESSED expression (Mann-Whitney U)
+  ⚠ Skipped — no expression column.
+
+CHECK 3: Mean complexity — BIVALENT > SIMPLE_AND
+  BIVALENT   mean complexity = 4.2249  (n=1614)
+  SIMPLE_AND mean complexity = 1.0000  (n=10016)
+  BIVALENT > SIMPLE_AND: ✓ PASS
+
+CHECK 4: NULL genes have lowest mean expression
+  ⚠ Skipped — no expression column.
+
+COMPLEXITY SCORE SUMMARY BY GATE TYPE
+  GATE TYPE                   MEAN COMPLEXITY   N GENES
+  -------------------------------------------------------
+  BIVALENT                             4.2249      1614
+  COMPLEX                              3.7145       753
+  INCONSISTENT                         1.5797      5165
+  REPRESSED                            1.0403      3923
+  SIMPLE_AND                           1.0000     10016
+  SIMPLE_OR                            0.0000       991
+
+========================================================================
+LANDMARK ACCURACY: 26.7%  |  70% THRESHOLD: NOT MET ✗
+========================================================================

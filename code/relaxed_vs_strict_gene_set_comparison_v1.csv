@@ -1,0 +1,2 @@
+strict_k562_origin_mapped_n,relaxed_k562_origin_mapped_n,k562_growth_ratio,strict_gm12878_origin_mapped_n,relaxed_gm12878_origin_mapped_n,gm12878_growth_ratio,growth_asymmetry_ratio_k562_over_gm12878,flag
+170,352,2.070588235294118,3119,3242,1.0394357165758257,1.9920310628878326,GROWTH ROUGHLY SYMMETRIC — relaxation affects both origins proportionally; less suggestive of a K562-specific artifact.

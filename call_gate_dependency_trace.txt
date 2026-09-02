@@ -1,0 +1,6 @@
+call_gate() dependency trace
+Generated: 2026-08-07T21:57:55.547109
+Label variable names searched: ['expr_label', 'expressed', 'expression_label', 'is_expressed']
+======================================================================
+
+No candidate files found under SEARCH_ROOT. Edit CANDIDATE_FILES or SEARCH_ROOT in this script and re-run.

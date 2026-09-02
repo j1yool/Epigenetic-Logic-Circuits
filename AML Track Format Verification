@@ -1,0 +1,23 @@
+# save as data/aml/verify_aml_file.py
+import pandas as pd
+import subprocess
+import sys
+
+aml_file = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw 2"
+
+# Check chromosome naming
+with open(aml_file) as f:
+    lines = [f.readline() for _ in range(20) if not f.readline().startswith('#')]
+
+with open(aml_file) as f:
+    for line in f:
+        if line.startswith('#'):
+            continue
+        chrom = line.split('\t')[0]
+        print(f"First chromosome found: {chrom}")
+        break
+
+# chr-prefix check
+has_chr = chrom.startswith('chr')
+print(f"Has chr prefix: {has_chr}")
+print("Action needed: " + ("None — matches GM12878 format" if has_chr else "Add chr prefix before merging with GM12878 data"))

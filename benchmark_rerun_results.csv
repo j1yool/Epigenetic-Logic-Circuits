@@ -1,0 +1,7 @@
+cell_line,model,auc
+GM12878,gate-type,0.9869
+GM12878,marks-only,0.7953
+GM12878,X_complex,0.9311
+K562,gate-type,0.9979
+K562,marks-only,0.7531
+K562,X_complex,0.9867

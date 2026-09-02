@@ -1,0 +1,20 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import pandas as pd
+
+df = pd.read_csv(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\gate_assignments_named.tsv", sep="\t")
+
+print("=== complexity_score describe() ===")
+print(df['complexity_score'].describe())
+print()
+print("=== nunique() ===")
+print("Unique values:", df['complexity_score'].nunique())
+print()
+print("=== value_counts() ===")
+print(df['complexity_score'].value_counts().sort_index())
+print()
+print("=== crosstab: gate_type vs complexity_score ===")
+print(pd.crosstab(df['gate_type'], df['complexity_score']))

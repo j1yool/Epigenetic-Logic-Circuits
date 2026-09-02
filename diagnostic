@@ -1,0 +1,29 @@
+"""
+diagnose_complexity.py
+Standalone diagnostic — run independently of roc_stats_and_figures.py.
+Answers: (1) is complexity_score degenerate in either dataset, and
+(2) does it actually vary within gate_type groups (the real question,
+since if complexity only varies BETWEEN gate types, it's redundant with
+the gate dummies by construction, not by data error).
+"""
+
+import pandas as pd
+
+FILES = {
+    "GM12878": ("data/binary_matrix.csv", "data/gate_assignments_named.tsv"),
+    "K562": ("data/k562/k562_binary_matrix.csv", "data/k562/k562_gate_assignments_named.tsv"),
+}
+
+for cell_line, (bm_path, gate_path) in FILES.items():
+    bm = pd.read_csv(bm_path).rename(columns={"Unnamed: 0": "gene_id"})
+    gt = pd.read_csv(gate_path, sep="\t")
+    merged = bm.merge(gt, on="gene_id", how="inner").dropna(
+        subset=["expressed", "H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"]
+    )
+
+    print(f"\n=== {cell_line} ===")
+    print("complexity_score describe():")
+    print(merged["complexity_score"].describe())
+    print(f"complexity_score nunique(): {merged['complexity_score'].nunique()}")
+    print("Within-gate-type variance (does complexity vary INSIDE each gate_type group?):")
+    print(merged.groupby("gate_type")["complexity_score"].nunique())

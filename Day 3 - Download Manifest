@@ -1,0 +1,56 @@
+"""
+ENCODE Data Download Manifest
+Project: Epigenetic Logic Circuits
+Cell Type: GM12878 (development/validation)
+Date: [today]
+
+Rationale: GM12878 selected for pipeline development due to data depth
+and replication. CD34+ HSCs to be added Days 46-60 for AML comparison.
+"""
+
+# Target ChIP-seq experiments
+# Format: {mark: [ENCODE_accession, description, rationale]}
+CHIPSEQ_TARGETS = {
+    "H3K4me3": {
+        "narrowpeak_accession": "ENCFF602ALN",
+        "bigwig_accession": "ENCFF724WTY",
+        "mark_role": "active_promoter",
+        "gate_role": "AND_gate_input_activating",
+        "expected_pattern": "sharp peaks at TSS"
+    },
+    "H3K27ac": {
+        "narrowpeak_accession": "ENCFF367KIF",
+        "bigwig_accession": "ENCFF280OMQ",
+        "mark_role": "active_enhancer_promoter", 
+        "gate_role": "AND_gate_input_activating",
+        "expected_pattern": "broad peaks at active elements"
+    },
+    "H3K4me1": {
+        "narrowpeak_accession": "ENCFF378FBA",
+        "bigwig_accession": "ENCFF831ZHL",
+        "mark_role": "poised_enhancer",
+        "gate_role": "context_mark",
+        "expected_pattern": "broad peaks at enhancers"
+    },
+    "H3K27me3": {
+        "narrowpeak_accession": "ENCFF778CPR",
+        "bigwig_accession": "ENCFF543IHG",
+        "mark_role": "polycomb_repression",
+        "gate_role": "NOT_gate_input",
+        "expected_pattern": "broad domains over silent genes"
+    },
+    "H3K9me3": {
+        "narrowpeak_accession": "ENCFF833BJA",
+        "bigwig_accession": "ENCFF904MLW"
+        "mark_role": "constitutive_heterochromatin",
+        "gate_role": "NOT_gate_input_constitutive",
+        "expected_pattern": "large domains, satellite repeats"
+    }
+}
+
+RNA_SEQ_TARGET = {
+    "accession": "ENCFF680ZFZ",
+    "quantification": "TPM",
+    "expression_threshold": 1.0,
+    "rationale": "Field-standard threshold for expressed vs silent"
+}

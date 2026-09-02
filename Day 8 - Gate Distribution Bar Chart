@@ -1,0 +1,80 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+
+# ── Load data ──────────────────────────────────────────────
+df = pd.read_csv(r"data\gate_assignments_named.tsv", sep="\t")
+
+# ── Gate order (complexity ascending) ──────────────────────
+gate_order = [
+    "REPRESSED",
+    "SIMPLE_OR",
+    "SIMPLE_AND",
+    "INCONSISTENT",
+    "COMPLEX",
+    "BIVALENT"
+]
+
+# Colors: cool→warm as complexity increases
+colors = {
+    "REPRESSED":    "#4a90d9",
+    "SIMPLE_OR":    "#7bc8a4",
+    "SIMPLE_AND":   "#f5c842",
+    "INCONSISTENT": "#f5a623",
+    "COMPLEX":      "#e05c5c",
+    "BIVALENT":     "#9b59b6"
+}
+
+# ── Count and order ────────────────────────────────────────
+counts = df["gate_type"].value_counts()
+ordered_counts = [counts.get(g, 0) for g in gate_order]
+ordered_colors = [colors[g] for g in gate_order]
+
+# ── Percentages ────────────────────────────────────────────
+total = sum(ordered_counts)
+percentages = [c / total * 100 for c in ordered_counts]
+
+# ── Plot ───────────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(10, 6))
+
+bars = ax.bar(gate_order, ordered_counts, color=ordered_colors,
+              edgecolor="white", linewidth=0.8, width=0.65)
+
+# Percentage labels above each bar
+for bar, pct in zip(bars, percentages):
+    ax.text(bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 200,
+            f"{pct:.1f}%",
+            ha="center", va="bottom",
+            fontsize=10, fontweight="bold", color="#333333")
+
+# Formatting
+ax.set_xlabel("Epigenetic Gate Type", fontsize=13, labelpad=10)
+ax.set_ylabel("Number of Genes", fontsize=13, labelpad=10)
+ax.set_title(
+    "Distribution of Epigenetic Logic Gate Types\nin GM12878 (B-lymphoblastoid cell line)",
+    fontsize=14, fontweight="bold", pad=15
+)
+ax.set_ylim(0, max(ordered_counts) * 1.15)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.tick_params(axis="x", labelsize=11)
+ax.tick_params(axis="y", labelsize=10)
+ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x):,}"))
+
+# Complexity annotation arrow
+ax.annotate("", xy=(5.3, max(ordered_counts) * 0.95),
+            xytext=(3.7, max(ordered_counts) * 0.95),
+            arrowprops=dict(arrowstyle="->", color="#888888", lw=1.5))
+ax.text(4.5, max(ordered_counts) * 0.97, "Increasing complexity",
+        ha="center", fontsize=9, color="#888888")
+
+plt.tight_layout()
+plt.savefig(r"figures\figure1_gate_distribution.png", dpi=300, bbox_inches="tight")
+plt.savefig(r"figures\figure1_gate_distribution.svg", dpi=300, bbox_inches="tight")
+print("Figure 1 saved.")
+print("\nGate counts:")
+for gate, count, pct in zip(gate_order, ordered_counts, percentages):
+    print(f"  {gate:<15} {count:>7,}  ({pct:.1f}%)")
+print(f"\n  TOTAL: {total:,}")

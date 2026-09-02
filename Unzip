@@ -1,0 +1,13 @@
+import pandas as pd
+
+cols = ["chrom","start","end","name","score",
+        "strand","signalValue","pValue","qValue","peak"]
+bed = pd.read_csv(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF636FWF.bed.gz",
+                  sep="\t", header=None, names=cols)
+print("BED chromosomes:", bed["chrom"].unique()[:5])
+
+gtf = open(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\Homo_sapiens.GRCh38.109.gtf")
+for line in gtf:
+    if not line.startswith("#"):
+        print("GTF chromosome:", line.split("\t")[0])
+        break

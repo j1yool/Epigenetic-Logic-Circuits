@@ -1,0 +1,58 @@
+======================================================================
+BLOCK 1 — LANDMARK GENE LOOKUP
+======================================================================
+
+── Expected gate: BIVALENT ──
+  GENE          EXPECTED        ACTUAL                COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  HOXA1         BIVALENT        INCONSISTENT               1.000  ✗ FAIL
+  HOXA5         BIVALENT        nan                       -1.000  ✗ FAIL
+  HOXA9         BIVALENT        REPRESSED                  1.000  ✗ FAIL
+  HOXA10        BIVALENT        REPRESSED                  3.000  ✗ FAIL
+  HOXB4         BIVALENT        SIMPLE_AND                 1.000  ✗ FAIL
+  PAX5          BIVALENT        SIMPLE_AND                 1.000  ✗ FAIL
+  GATA2         BIVALENT        REPRESSED                  1.000  ✗ FAIL
+
+── Expected gate: SIMPLE_AND ──
+  GENE          EXPECTED        ACTUAL                COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  GAPDH         SIMPLE_AND      SIMPLE_AND                 1.000  ✓ PASS
+  ACTB          SIMPLE_AND      SIMPLE_OR                  0.000  ✗ FAIL
+  B2M           SIMPLE_AND      SIMPLE_AND                 1.000  ✓ PASS
+  HPRT1         SIMPLE_AND      SIMPLE_AND                 1.000  ✓ PASS
+  RPL13A        SIMPLE_AND      SIMPLE_AND                 1.000  ✓ PASS
+
+── Expected gate: REPRESSED ──
+  GENE          EXPECTED        ACTUAL                COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  CDH1          REPRESSED       SIMPLE_OR                  0.000  ✗ FAIL
+  HBB           REPRESSED       nan                       -1.000  ✗ FAIL
+
+── Expected gate: NULL ──
+  GENE          EXPECTED        ACTUAL                COMPLEXITY  RESULT
+  --------------------------------------------------------------------
+  OR4F5         NULL            nan                       -1.000  ✗ FAIL
+  OR4F29        NULL            NOT FOUND                    N/A  ⚠ MISSING
+
+======================================================================
+LANDMARK ACCURACY SUMMARY
+======================================================================
+  Genes queried : 16
+  Found in TSV  : 15
+  PASS          : 4
+  FAIL          : 11
+  MISSING       : 1
+  Accuracy      : 26.7%
+  70% threshold : NOT MET ✗ — adjust thresholds before proceeding
+
+  Missing genes (not in gate_assignments.tsv): OR4F29
+  These may be named differently in Ensembl annotation.
+  Check the TSV manually for alternate names (e.g. ACTB vs ACTB.1).
+
+DIAGNOSTIC HINTS:
+  HOXB4: got SIMPLE_AND instead of BIVALENT → H3K27me3 threshold may be too low.
+  PAX5: got SIMPLE_AND instead of BIVALENT → H3K27me3 threshold may be too low.
+  ACTB: got SIMPLE_OR instead of SIMPLE_AND → check peak-to-gene assignment at TSS ± window.
+  CDH1: got SIMPLE_OR instead of REPRESSED → H3K27me3 or H3K9me3 not being picked up.
+  HBB: got nan instead of REPRESSED → H3K27me3 or H3K9me3 not being picked up.
+  OR4F5: got nan instead of NULL → check that no marks leak into olfactory receptor loci.

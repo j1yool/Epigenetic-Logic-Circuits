@@ -1,0 +1,37 @@
+=== Switching-Gene CSV Provenance Check (mtime-based) ===
+
+Fix script path: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\block5_auc_comparison_both_lines.py
+Fix script mtime: 1783535594.6506753
+CSV path: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_gene_auc_comparison.csv
+CSV mtime: 1785727803.024903
+CSV is NEWER than fix script by mtime.
+
+NOTE: mtime is a weaker signal than commit history — it can be reset by copies, pulls, or backups. Treat this as supporting evidence, not sole proof.
+
+--- Scripts referencing target CSV filename ---
+
+File: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\check_switching_gene_csv_provenance.py
+  L4: Verdict: was switching_gene_auc_comparison.csv regenerated AFTER the
+  L22: TARGET_CSV_NAME = "switching_gene_auc_comparison.csv"
+
+File: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_gene_expression_prediction.py
+  L39: Output: switching_gene_auc_comparison.csv
+  L64: OUTPUT_PATH = "switching_gene_auc_comparison.csv"
+
+--- Model-definition check on candidate producer(s) ---
+
+C:\Users\jamoo\Downloads\LOGIC CIRCUITS\check_switching_gene_csv_provenance.py:
+  uses_liblinear      : True
+  references_GM12878  : True
+  references_K562     : True
+    evidence: Contains solver='liblinear'.
+
+C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_gene_expression_prediction.py:
+  uses_liblinear      : True
+  references_GM12878  : True
+  references_K562     : True
+    evidence: Contains solver='liblinear'.
+
+=== VERDICT ===
+
+FINAL VERDICT: CONFIRMED post-reconciliation, safe to use

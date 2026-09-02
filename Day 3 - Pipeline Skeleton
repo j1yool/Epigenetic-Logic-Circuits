@@ -1,0 +1,48 @@
+"""
+Logic Circuit Pipeline - Skeleton
+Status: Structure only, no implementation
+"""
+
+def step1_process_chipseq(narrowpeak_file, genome_windows):
+    """
+    Input: ENCODE narrowPeak file, genomic windows around TSSs
+    Output: Binary matrix (genes × marks) — peak present/absent
+    Status: NOT IMPLEMENTED
+    """
+    pass
+
+def step2_process_rnaseq(rnaseq_file, threshold=1.0):
+    """
+    Input: ENCODE RNA-seq quantification file
+    Output: Binary vector (genes) — expressed/silent
+    Status: NOT IMPLEMENTED
+    """
+    pass
+
+def step3_classify_gate(binary_mark_vector, expression_value):
+    """
+    Input: Binary vector of marks for one gene, expression binary
+    Output: Gate type (AND/OR/NOT/COMPLEX), confidence score
+    Status: NOT IMPLEMENTED — pseudocode written in framework_v1.md
+    """
+    pass
+
+def step4_build_gate_atlas(gene_list, mark_matrix, expression_vector):
+    """
+    Input: All genes, all marks, all expression values
+    Output: DataFrame with columns [gene, gate_type, confidence, marks_used]
+    Status: NOT IMPLEMENTED
+    """
+    pass
+
+def step5_validate_framework(gate_atlas, known_gene_classes):
+    """
+    Input: Gate atlas, curated list of housekeeping/developmental genes
+    Output: Validation metrics — do housekeeping genes show AND gates?
+    Status: NOT IMPLEMENTED
+    """
+    pass
+
+if __name__ == "__main__":
+    print("Pipeline skeleton loaded. All steps pending implementation.")
+    print("Next implementation target: step1 and step2 (Days 31-35)")

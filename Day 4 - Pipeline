@@ -1,0 +1,105 @@
+import pandas as pd
+import numpy as np
+import subprocess
+import os
+
+def convert_bb_to_bed(bb_path):
+    bed_path = bb_path.replace(".bigBed", ".bed")
+    if not os.path.exists(bed_path):
+        subprocess.run(["bigBedToBed", bb_path, bed_path], check=True)
+    return bed_path
+
+def load_narrowpeak(filepath):
+    cols = ["chrom","start","end","name","score",
+            "strand","signalValue","pValue","qValue","peak"]
+    compression = "gzip" if filepath.endswith(".gz") else None
+    df = pd.read_csv(filepath, sep="\t", header=None,
+                     names=cols, compression=compression)
+    df["chrom"] = df["chrom"].str.replace("chr", "", regex=False)
+    return df
+
+def load_gene_windows(gtf_path, window=3000):
+    genes = []
+    with open(gtf_path) as f:
+        for line in f:
+            if line.startswith("#"): continue
+            parts = line.strip().split("\t")
+            if len(parts) < 9: continue
+            if parts[2] != "gene": continue
+            chrom = parts[0]
+            start = int(parts[3])
+            end = int(parts[4])
+            strand = parts[6]
+            tss = start if strand == "+" else end
+            try:
+                gene_id = [x for x in parts[8].split(";")
+                           if "gene_id" in x][0].split('"')[1]
+            except:
+                continue
+            genes.append({
+                "gene_id": gene_id,
+                "chrom": chrom,
+                "tss_start": tss - window,
+                "tss_end": tss + window
+            })
+    return pd.DataFrame(genes)
+
+def assign_peaks_to_genes(peaks_df, gene_windows_df):
+    result = {}
+    for _, gene in gene_windows_df.iterrows():
+        overlapping = peaks_df[
+            (peaks_df["chrom"] == gene["chrom"]) &
+            (peaks_df["start"] < gene["tss_end"]) &
+            (peaks_df["end"] > gene["tss_start"])
+        ]
+        result[gene["gene_id"]] = 1 if len(overlapping) > 0 else 0
+    return pd.Series(result)
+
+def load_rnaseq(filepath):
+    compression = "gzip" if filepath.endswith(".gz") else None
+    df = pd.read_csv(filepath, sep="\t", compression=compression)
+    df.columns = [c.lower() for c in df.columns]
+    tpm_col = [c for c in df.columns if "tpm" in c][0]
+    id_col = [c for c in df.columns if "gene" in c][0]
+    df = df[[id_col, tpm_col]].rename(columns={id_col: "gene_id", tpm_col: "tpm"})
+    df["gene_id"] = df["gene_id"].str.split(".").str[0]
+    return df
+
+def binarize_expression(rnaseq_df, threshold_tpm=1.0):
+    return (rnaseq_df.set_index("gene_id")["tpm"] >= threshold_tpm).astype(int)
+
+def build_binary_matrix(chip_files_dict, rnaseq_file, gene_windows_df):
+    all_series = {}
+    for mark, filepath in chip_files_dict.items():
+        print(f"Processing {mark}...")
+        peaks = load_narrowpeak(filepath)
+        all_series[mark] = assign_peaks_to_genes(peaks, gene_windows_df)
+    rnaseq = load_rnaseq(rnaseq_file)
+    all_series["expressed"] = binarize_expression(rnaseq)
+    matrix = pd.DataFrame(all_series).dropna()
+    return matrix
+
+if __name__ == "__main__":
+    print("Loading gene windows...")
+    gene_windows = load_gene_windows(
+        r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\Homo_sapiens.GRCh38.109.gtf"
+    )
+
+    chip_files = {
+        "H3K4me3":  r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF636FWF.bed.gz",
+        "H3K27ac":  r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF367KIF.bed.gz",
+        "H3K4me1":  r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF268NGU.bed.gz",
+        "H3K27me3": r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF153VOQ.bed.gz",
+        "H3K9me3":  r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF833BJA.bed.gz",
+    }
+
+    rnaseq_file = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\raw\ENCFF680ZFZ.tsv"
+
+    matrix = build_binary_matrix(chip_files, rnaseq_file, gene_windows)
+
+    print(matrix.shape)
+    print(matrix.sum())
+    print(matrix["expressed"].mean())
+
+    matrix.to_csv(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\binary_matrix.csv")
+    print("Done. Binary matrix saved.")

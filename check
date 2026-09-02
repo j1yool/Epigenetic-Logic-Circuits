@@ -1,0 +1,5 @@
+import pandas as pd
+gm_raw = pd.read_csv("gate_assignments_regenerated_v1.tsv", sep="\t")
+k562_raw = pd.read_csv("k562_gate_assignments_regenerated_v1.tsv", sep="\t")
+print("GM gate_type values:\n", gm_raw["gate_type"].value_counts(dropna=False))
+print("K562 gate_type values:\n", k562_raw["gate_type"].value_counts(dropna=False))

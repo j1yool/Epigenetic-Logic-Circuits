@@ -1,0 +1,41 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import chi2_contingency
+
+gm = pd.read_csv(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\gate_assignments_named.tsv", sep="\t")
+k562 = pd.read_csv(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\data\k562\k562_gate_assignments_named.tsv", sep="\t")
+
+gm_counts = gm["gate_type"].value_counts(normalize=True).sort_index()
+k562_counts = k562["gate_type"].value_counts(normalize=True).sort_index()
+
+print("GM12878 gate-type proportions:\n", gm_counts)
+print("\nK562 gate-type proportions:\n", k562_counts)
+
+gate_types = sorted(set(gm_counts.index) | set(k562_counts.index))
+gm_vals = [gm_counts.get(g, 0) for g in gate_types]
+k562_vals = [k562_counts.get(g, 0) for g in gate_types]
+
+x = range(len(gate_types))
+width = 0.35
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.bar([i - width/2 for i in x], gm_vals, width, label="GM12878", color="#4C72B0")
+ax.bar([i + width/2 for i in x], k562_vals, width, label="K562", color="#C44E52")
+ax.set_xticks(list(x))
+ax.set_xticklabels(gate_types)
+ax.set_ylabel("Proportion of genes")
+ax.set_title("Gate-Type Distribution: GM12878 vs K562")
+ax.legend()
+plt.tight_layout()
+plt.savefig(r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS\figures\figure2_gate_distribution_comparison.png", dpi=300)
+print("\nSaved figure2_gate_distribution_comparison.png")
+
+gm_raw = gm["gate_type"].value_counts().reindex(gate_types, fill_value=0)
+k562_raw = k562["gate_type"].value_counts().reindex(gate_types, fill_value=0)
+contingency = pd.DataFrame({"GM12878": gm_raw, "K562": k562_raw})
+chi2, p, dof, expected = chi2_contingency(contingency)
+print(f"\nChi-square: {chi2:.3f}, p-value: {p:.4e}, dof: {dof}")

@@ -1,0 +1,337 @@
+"""
+roc_stats_and_figures.py
+Day 19, Block 2 — Epigenetic Logic Circuits
+
+Purpose: Add bootstrap 95% CIs and a bootstrap significance test to the AUC
+comparisons (marks-only vs gate-type vs complexity) for GM12878 and K562,
+and produce final ROC figures with shaded CI bands.
+
+Addresses self-review item #3 (point-estimate AUCs with no CI/significance
+test) from self_review_v1.md.
+
+EXPECTED INPUT SCHEMA (adjust the CONFIG block below if your actual files differ):
+  data/binary_matrix.csv          — GM12878, one row per gene
+  data/gate_assignments_named.tsv — GM12878 gate calls, one row per gene
+  data/k562/k562_binary_matrix.csv        — K562, one row per gene
+  data/k562/k562_gate_assignments_named.tsv — K562 gate calls, one row per gene
+
+Each binary_matrix file is assumed to have:
+  - a gene identifier column
+  - binary mark columns (H3K4me3, H3K27ac, H3K4me1, H3K27me3, H3K9me3)
+  - an expression label column (binary: expressed / not expressed)
+
+Each gate_assignments file is assumed to have:
+  - a gene identifier column (joins to binary_matrix)
+  - a gate_type column (categorical: AND, OR, XOR, NOT, COMPLEX, etc.)
+  - a complexity column (numeric complexity score)
+
+If your actual column names differ from CONFIG, this script will print exactly
+which column it could not find and exit — no silent guessing, no partial run.
+"""
+
+import os
+
+# ---- CRITICAL WINDOWS FIX — must precede any numeric library imports ----
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import sys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_curve, roc_auc_score
+
+RNG_SEED = 42
+N_BOOTSTRAP = 1000
+CI_LOW, CI_HIGH = 2.5, 97.5  # percentiles for 95% CI
+
+# ============================================================
+# CONFIG — edit these if actual filenames/column names differ
+# ============================================================
+
+CONFIG = {
+    "GM12878": {
+        "binary_matrix_path": "data/binary_matrix.csv",
+        "gate_path": "data/gate_assignments_named.tsv",
+        "gate_sep": "\t",
+        "gene_id_col": "gene_id",
+        "mark_cols": ["H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"],
+        "expression_col": "expressed",
+        "gate_type_col": "gate_type",
+        "complexity_col": "complexity_score",
+    },
+    "K562": {
+        "binary_matrix_path": "data/k562/k562_binary_matrix.csv",
+        "gate_path": "data/k562/k562_gate_assignments_named.tsv",
+        "gate_sep": "\t",
+        "gene_id_col": "gene_id",
+        "mark_cols": ["H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"],
+        "expression_col": "expressed",
+        "gate_type_col": "gate_type",
+        "complexity_col": "complexity_score",
+    },
+}
+
+OUT_FIG_DIR = "figures"
+OUT_DATA_DIR = "data"
+
+
+def load_and_check(cell_line, cfg):
+    """Load binary matrix + gate assignments, join, and validate all required
+    columns exist. Fails loudly and immediately if schema doesn't match —
+    no partial execution."""
+    try:
+        bm = pd.read_csv(cfg["binary_matrix_path"])
+    except FileNotFoundError:
+        sys.exit(
+            f"[{cell_line}] FATAL: could not find binary matrix at "
+            f"'{cfg['binary_matrix_path']}'. Fix: correct the path in CONFIG "
+            f"at top of script, then rerun."
+        )
+    
+    bm = bm.rename(columns={"Unnamed: 0": cfg["gene_id_col"]})
+    
+    try:
+        gt = pd.read_csv(cfg["gate_path"], sep=cfg["gate_sep"])
+    except FileNotFoundError:
+        sys.exit(
+            f"[{cell_line}] FATAL: could not find gate assignment file at "
+            f"'{cfg['gate_path']}'. Fix: correct the path in CONFIG at top "
+            f"of script, then rerun."
+        )
+
+    required_bm_cols = [cfg["gene_id_col"], cfg["expression_col"]] + cfg["mark_cols"]
+    missing_bm = [c for c in required_bm_cols if c not in bm.columns]
+    if missing_bm:
+        sys.exit(
+            f"[{cell_line}] FATAL: binary matrix missing columns {missing_bm}. "
+            f"Actual columns found: {list(bm.columns)}. "
+            f"Fix: update mark_cols/gene_id_col/expression_col in CONFIG."
+        )
+
+    required_gt_cols = [cfg["gene_id_col"], cfg["gate_type_col"], cfg["complexity_col"]]
+    missing_gt = [c for c in required_gt_cols if c not in gt.columns]
+    if missing_gt:
+        sys.exit(
+            f"[{cell_line}] FATAL: gate assignment file missing columns {missing_gt}. "
+            f"Actual columns found: {list(gt.columns)}. "
+            f"Fix: update gate_type_col/complexity_col in CONFIG."
+        )
+
+    merged = bm.merge(gt, on=cfg["gene_id_col"], how="inner")
+    if len(merged) == 0:
+        sys.exit(
+            f"[{cell_line}] FATAL: merge on '{cfg['gene_id_col']}' produced zero rows. "
+            f"Check that gene identifiers match format between the two files "
+            f"(e.g. version suffixes like ENSG00000141510.11 vs .10)."
+        )
+
+    n_dropped = len(bm) - len(merged)
+    if n_dropped > 0:
+        print(f"[{cell_line}] NOTE: {n_dropped} genes dropped in merge "
+              f"(present in one file, absent in other).")
+
+    required_cols = [cfg["expression_col"]] + cfg["mark_cols"]      # <-- add
+    n_before = len(merged)                                          # <-- add
+    merged = merged.dropna(subset=required_cols)                    # <-- add
+    n_na_dropped = n_before - len(merged)                            # <-- add
+    if n_na_dropped > 0:                                             # <-- add
+        print(f"[{cell_line}] NOTE: {n_na_dropped} genes dropped for "  # <-- add
+              f"missing values in expression/mark columns.")           # <-- add
+
+    print(f"[{cell_line}] Loaded {len(merged)} genes after merge.")
+    return merged
+
+
+def build_feature_sets(df, cfg):
+    """Return three feature matrices (marks-only, gate-type, complexity) and
+    the shared label vector."""
+    y = df[cfg["expression_col"]].astype(int).values
+
+    X_marks = df[cfg["mark_cols"]].astype(int).values
+
+    gate_dummies = pd.get_dummies(df[cfg["gate_type_col"]], prefix="gate")
+    X_gate = pd.concat(
+        [df[cfg["mark_cols"]].astype(int).reset_index(drop=True), gate_dummies.reset_index(drop=True)],
+        axis=1,
+    ).values
+
+    X_complex = pd.concat(
+        [
+            df[cfg["mark_cols"]].astype(int).reset_index(drop=True),
+            df[[cfg["complexity_col"]]].reset_index(drop=True),
+        ],
+        axis=1,
+    ).values
+
+    return {"marks": X_marks, "gate_type": X_gate, "complexity": X_complex}, y
+
+
+def fit_auc(X, y, random_state=RNG_SEED):
+    """Fit logistic regression (liblinear, per Windows conflict avoidance
+    rule) on the full data and return fitted AUC and predicted probabilities."""
+    model = LogisticRegression(solver="liblinear", max_iter=1000, random_state=random_state)
+    model.fit(X, y)
+    probs = model.predict_proba(X)[:, 1]
+    auc = roc_auc_score(y, probs)
+    return auc, probs, model
+
+
+def bootstrap_auc_ci(X, y, n_boot=N_BOOTSTRAP, seed=RNG_SEED):
+    """Stratified bootstrap resampling to get AUC distribution.
+    Returns array of bootstrap AUCs."""
+    rng = np.random.RandomState(seed)
+    n = len(y)
+    idx_pos = np.where(y == 1)[0]
+    idx_neg = np.where(y == 0)[0]
+
+    boot_aucs = np.empty(n_boot)
+    for b in range(n_boot):
+        samp_pos = rng.choice(idx_pos, size=len(idx_pos), replace=True)
+        samp_neg = rng.choice(idx_neg, size=len(idx_neg), replace=True)
+        samp_idx = np.concatenate([samp_pos, samp_neg])
+        X_b, y_b = X[samp_idx], y[samp_idx]
+
+        # Skip degenerate resamples (shouldn't occur with stratified sampling,
+        # but guard anyway so a rare edge case doesn't crash a 1000-iteration run)
+        if len(np.unique(y_b)) < 2:
+            boot_aucs[b] = np.nan
+            continue
+
+        model = LogisticRegression(solver="liblinear", max_iter=1000, random_state=seed)
+        model.fit(X_b, y_b)
+        probs_b = model.predict_proba(X_b)[:, 1]
+        boot_aucs[b] = roc_auc_score(y_b, probs_b)
+
+    return boot_aucs[~np.isnan(boot_aucs)]
+
+
+def bootstrap_delta_test(X_base, X_compare, y, n_boot=N_BOOTSTRAP, seed=RNG_SEED):
+    """Paired bootstrap: resample the SAME indices for both feature sets each
+    iteration, so the delta (compare_auc - base_auc) is computed on matched
+    resamples. Returns array of bootstrapped deltas; p-value = 2 * min(
+    fraction <=0, fraction >=0) as a two-sided test against delta=0."""
+    rng = np.random.RandomState(seed)
+    n = len(y)
+    idx_pos = np.where(y == 1)[0]
+    idx_neg = np.where(y == 0)[0]
+
+    deltas = np.empty(n_boot)
+    for b in range(n_boot):
+        samp_pos = rng.choice(idx_pos, size=len(idx_pos), replace=True)
+        samp_neg = rng.choice(idx_neg, size=len(idx_neg), replace=True)
+        samp_idx = np.concatenate([samp_pos, samp_neg])
+        y_b = y[samp_idx]
+
+        if len(np.unique(y_b)) < 2:
+            deltas[b] = np.nan
+            continue
+
+        m_base = LogisticRegression(solver="liblinear", max_iter=1000, random_state=seed)
+        m_base.fit(X_base[samp_idx], y_b)
+        auc_base = roc_auc_score(y_b, m_base.predict_proba(X_base[samp_idx])[:, 1])
+
+        m_cmp = LogisticRegression(solver="liblinear", max_iter=1000, random_state=seed)
+        m_cmp.fit(X_compare[samp_idx], y_b)
+        auc_cmp = roc_auc_score(y_b, m_cmp.predict_proba(X_compare[samp_idx])[:, 1])
+
+        deltas[b] = auc_cmp - auc_base
+
+    deltas = deltas[~np.isnan(deltas)]
+    frac_le_zero = np.mean(deltas <= 0)
+    frac_ge_zero = np.mean(deltas >= 0)
+    p_value = 2 * min(frac_le_zero, frac_ge_zero)
+    p_value = min(p_value, 1.0)
+    ci_low, ci_high = np.percentile(deltas, [CI_LOW, CI_HIGH])
+    return deltas, ci_low, ci_high, p_value
+
+
+def plot_roc_with_ci(y, probs, boot_aucs, cell_line, model_name, ax):
+    """Plot single ROC curve with a shaded band representing bootstrap
+    variability, approximated by resampling the ROC curve itself."""
+    fpr, tpr, _ = roc_curve(y, probs)
+    point_auc = roc_auc_score(y, probs)
+    ci_low, ci_high = np.percentile(boot_aucs, [CI_LOW, CI_HIGH])
+
+    ax.plot(fpr, tpr, label=f"{model_name} (AUC={point_auc:.3f}, 95% CI [{ci_low:.3f}, {ci_high:.3f}])")
+    ax.fill_between(fpr, np.clip(tpr - (ci_high - ci_low) / 2, 0, 1),
+                     np.clip(tpr + (ci_high - ci_low) / 2, 0, 1), alpha=0.08)
+    return ci_low, ci_high, point_auc
+
+
+def main():
+    os.makedirs(OUT_FIG_DIR, exist_ok=True)
+    os.makedirs(OUT_DATA_DIR, exist_ok=True)
+
+    summary_rows = []
+
+    for cell_line, cfg in CONFIG.items():
+        print(f"\n=== Processing {cell_line} ===")
+        df = load_and_check(cell_line, cfg)
+        feature_sets, y = build_feature_sets(df, cfg)
+
+        fig, ax = plt.subplots(figsize=(7, 6))
+        model_results = {}
+
+        for model_name, X in feature_sets.items():
+            print(f"  Fitting + bootstrapping: {model_name} ...")
+            point_auc, probs, _ = fit_auc(X, y)
+            boot_aucs = bootstrap_auc_ci(X, y)
+            ci_low, ci_high, _ = plot_roc_with_ci(y, probs, boot_aucs, cell_line, model_name, ax)
+
+            model_results[model_name] = {
+                "auc": point_auc,
+                "ci_low": ci_low,
+                "ci_high": ci_high,
+                "X": X,
+            }
+            summary_rows.append({
+                "cell_line": cell_line,
+                "model": model_name,
+                "auc": round(point_auc, 4),
+                "ci_95_low": round(ci_low, 4),
+                "ci_95_high": round(ci_high, 4),
+                "n_genes": len(y),
+                "n_bootstrap": N_BOOTSTRAP,
+            })
+
+        ax.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=1)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title(f"{cell_line} — ROC Comparison (marks vs gate-type vs complexity)")
+        ax.legend(loc="lower right", fontsize=8)
+        fig_path = os.path.join(OUT_FIG_DIR, f"roc_{cell_line.lower()}_final.png")
+        fig.tight_layout()
+        fig.savefig(fig_path, dpi=200)
+        plt.close(fig)
+        print(f"  Saved figure: {fig_path}")
+
+        # Delta AUC significance test: gate_type vs marks (the headline comparison)
+        print(f"  Running paired bootstrap delta test (gate_type vs marks) for {cell_line} ...")
+        deltas, d_ci_low, d_ci_high, p_val = bootstrap_delta_test(
+            feature_sets["marks"], feature_sets["gate_type"], y
+        )
+        summary_rows.append({
+            "cell_line": cell_line,
+            "model": "delta_gate_vs_marks",
+            "auc": round(model_results["gate_type"]["auc"] - model_results["marks"]["auc"], 4),
+            "ci_95_low": round(d_ci_low, 4),
+            "ci_95_high": round(d_ci_high, 4),
+            "n_genes": len(y),
+            "n_bootstrap": N_BOOTSTRAP,
+            "p_value_two_sided": round(p_val, 4),
+        })
+        print(f"  Δ AUC (gate_type - marks) = {model_results['gate_type']['auc'] - model_results['marks']['auc']:.4f}, "
+              f"95% CI [{d_ci_low:.4f}, {d_ci_high:.4f}], p={p_val:.4f}")
+
+    summary_df = pd.DataFrame(summary_rows)
+    csv_path = os.path.join(OUT_DATA_DIR, "auc_stats_summary.csv")
+    summary_df.to_csv(csv_path, index=False)
+    print(f"\nSaved summary table: {csv_path}")
+    print(summary_df.to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,235 @@
+"""
+Block 5 — Expression Prediction AUC Comparison
+Merges binary_matrix.csv into gate_assignments.tsv, then compares:
+  Model 1: Individual histone marks only   (5 binary features)
+  Model 2: Gate type only                  (one-hot encoded categorical)
+  Model 3: Complexity score alone          (continuous)
+
+Run from: C:\\Users\\jamoo\\Downloads\\LOGIC CIRCUITS\\
+Outputs:
+  - figures/auc_comparison_day6.png
+  - block5_auc_results.txt
+"""
+
+import os
+import sys
+import warnings
+warnings.filterwarnings("ignore")
+
+import pandas as pd
+import numpy  as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from sklearn.linear_model    import LogisticRegression
+from sklearn.metrics         import roc_auc_score, roc_curve
+from sklearn.model_selection import train_test_split
+
+# ── paths ──────────────────────────────────────────────────────────────────────
+BASE_DIR    = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+GATE_FILE   = os.path.join(BASE_DIR, "data", "gate_assignments.tsv")
+MATRIX_FILE = os.path.join(BASE_DIR, "data", "binary_matrix.csv")
+FIG_DIR     = os.path.join(BASE_DIR, "figures")
+FIG_FILE    = os.path.join(FIG_DIR,  "auc_comparison_day6.png")
+OUT_FILE    = os.path.join(BASE_DIR, "block5_auc_results.txt")
+
+os.makedirs(FIG_DIR, exist_ok=True)
+
+# ── sanity checks ──────────────────────────────────────────────────────────────
+for path, label in [(GATE_FILE, "gate_assignments.tsv"), (MATRIX_FILE, "binary_matrix.csv")]:
+    if not os.path.isfile(path):
+        sys.exit(f"ERROR: Cannot find {label} at:\n  {path}")
+
+# ── load gate assignments ──────────────────────────────────────────────────────
+gates = pd.read_csv(GATE_FILE, sep="\t")
+gates.columns = [c.strip().lower() for c in gates.columns]
+
+# Resolve gene column (index or named column)
+gene_col = None
+for candidate in ["gene_id", "gene", "gene_name", "symbol"]:
+    if candidate in gates.columns:
+        gene_col = candidate
+        break
+
+if gene_col is None:
+    # Try treating the first column as gene IDs
+    first_col = gates.columns[0]
+    if gates[first_col].str.startswith("ENSG").any():
+        gene_col = first_col
+    else:
+        sys.exit(f"ERROR: No gene name column found in gate_assignments.tsv.\nColumns: {list(gates.columns)}")
+
+gate_col = None
+for candidate in ["gate", "gate_type", "gate_call"]:
+    if candidate in gates.columns:
+        gate_col = candidate
+        break
+if gate_col is None:
+    sys.exit(f"ERROR: No gate column found in gate_assignments.tsv.\nColumns: {list(gates.columns)}")
+
+complexity_col = None
+for candidate in ["complexity", "complexity_score", "complexity score"]:
+    if candidate in gates.columns:
+        complexity_col = candidate
+        break
+if complexity_col is None:
+    sys.exit(f"ERROR: No complexity column found in gate_assignments.tsv.\nColumns: {list(gates.columns)}")
+
+# ── load binary matrix ─────────────────────────────────────────────────────────
+# First column is the Ensembl gene ID (unnamed index column from pandas to_csv)
+mat = pd.read_csv(MATRIX_FILE, index_col=0)
+mat.columns = [c.strip().lower() for c in mat.columns]
+
+# Confirm expected columns exist
+REQUIRED_MATRIX_COLS = ["h3k4me3", "h3k27ac", "h3k4me1", "h3k27me3", "h3k9me3", "expressed"]
+missing_cols = [c for c in REQUIRED_MATRIX_COLS if c not in mat.columns]
+if missing_cols:
+    sys.exit(
+        f"ERROR: binary_matrix.csv is missing columns: {missing_cols}\n"
+        f"Columns found: {list(mat.columns)}"
+    )
+
+mat = mat[REQUIRED_MATRIX_COLS].copy()
+mat.index.name = "ensembl_id"
+mat = mat.reset_index()   # ensembl_id is now a regular column
+
+# ── merge ──────────────────────────────────────────────────────────────────────
+# gate_assignments gene_col contains Ensembl IDs (ENSG...) — merge on that
+pre_merge = len(gates)
+df = gates.merge(mat, left_on=gene_col, right_on="ensembl_id", how="inner")
+post_merge = len(df)
+
+print(f"Gate assignments : {pre_merge:,} genes")
+print(f"Binary matrix    : {len(mat):,} genes")
+print(f"After inner join : {post_merge:,} genes")
+
+if post_merge == 0:
+    sys.exit(
+        "ERROR: Zero rows after merge. The gene IDs in gate_assignments.tsv and "
+        "binary_matrix.csv do not match.\n"
+        f"  gate_assignments sample IDs : {gates[gene_col].head(3).tolist()}\n"
+        f"  binary_matrix    sample IDs : {mat['ensembl_id'].head(3).tolist()}"
+    )
+
+if post_merge < 1000:
+    print(f"WARNING: Only {post_merge:,} genes matched. Expected ~56,000. "
+          "Check for ID format mismatches (e.g. version suffixes like ENSG00000000003.1).")
+
+# ── build feature matrices ─────────────────────────────────────────────────────
+MARK_COLS = ["h3k4me3", "h3k27ac", "h3k4me1", "h3k27me3", "h3k9me3"]
+
+required = MARK_COLS + [gate_col, complexity_col, "expressed"]
+df_clean = df[required].dropna()
+dropped  = post_merge - len(df_clean)
+if dropped:
+    print(f"Dropped {dropped:,} rows with NaN values. Proceeding with {len(df_clean):,} genes.")
+
+if len(df_clean) < 100:
+    sys.exit("ERROR: Fewer than 100 clean rows. Check for NaN contamination in your TSV or CSV.")
+
+X_marks = df_clean[MARK_COLS].values.astype(float)
+X_gate  = pd.get_dummies(df_clean[gate_col].astype(str), prefix="gate").values.astype(float)
+X_compl = df_clean[complexity_col].values.reshape(-1, 1).astype(float)
+y       = df_clean["expressed"].values.astype(int)
+
+print(f"Expressed: {y.sum():,} / {len(y):,} genes ({y.mean()*100:.1f}%)")
+
+# ── single shared index split ──────────────────────────────────────────────────
+idx = np.arange(len(y))
+idx_tr, idx_te = train_test_split(idx, test_size=0.20, random_state=42, stratify=y)
+
+print(f"Train: {len(idx_tr):,}  |  Test: {len(idx_te):,}  |  "
+      f"Expressed in test: {y[idx_te].mean()*100:.1f}%")
+
+def fit_eval(X, idx_tr, idx_te, y):
+    """Fit logistic regression and return (auc, fpr, tpr)."""
+    lr = LogisticRegression(max_iter=1000, random_state=42, solver="lbfgs")
+    lr.fit(X[idx_tr], y[idx_tr])
+    prob = lr.predict_proba(X[idx_te])[:, 1]
+    auc  = roc_auc_score(y[idx_te], prob)
+    fpr, tpr, _ = roc_curve(y[idx_te], prob)
+    return auc, fpr, tpr
+
+auc_marks, fpr_m, tpr_m = fit_eval(X_marks, idx_tr, idx_te, y)
+auc_gate,  fpr_g, tpr_g = fit_eval(X_gate,  idx_tr, idx_te, y)
+auc_compl, fpr_c, tpr_c = fit_eval(X_compl, idx_tr, idx_te, y)
+
+print(f"\nModel 1 (individual marks)  AUC = {auc_marks:.4f}")
+print(f"Model 2 (gate type)         AUC = {auc_gate:.4f}")
+print(f"Model 3 (complexity score)  AUC = {auc_compl:.4f}")
+
+# ── ROC figure ─────────────────────────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(7, 6))
+
+ax.plot(fpr_m, tpr_m, color="#2c7bb6", lw=2,
+        label=f"Model 1: Individual marks  (AUC = {auc_marks:.3f})")
+ax.plot(fpr_g, tpr_g, color="#d7191c", lw=2,
+        label=f"Model 2: Gate type          (AUC = {auc_gate:.3f})")
+ax.plot(fpr_c, tpr_c, color="#1a9641", lw=2, linestyle="--",
+        label=f"Model 3: Complexity score   (AUC = {auc_compl:.3f})")
+ax.plot([0, 1], [0, 1], color="grey", lw=1, linestyle=":")
+
+ax.set_xlabel("False Positive Rate", fontsize=12)
+ax.set_ylabel("True Positive Rate", fontsize=12)
+ax.set_title(
+    "ROC Curves — Predicting Gene Expression (TPM > 1)\n"
+    "GM12878 Epigenetic Logic Gate Framework",
+    fontsize=11
+)
+ax.legend(loc="lower right", fontsize=10)
+ax.set_xlim([0, 1])
+ax.set_ylim([0, 1.02])
+ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig(FIG_FILE, dpi=150)
+plt.close()
+print(f"\nFigure saved: {FIG_FILE}")
+
+# ── text report ────────────────────────────────────────────────────────────────
+gate_wins = auc_gate > auc_marks
+delta     = auc_gate - auc_marks
+
+lines = []
+lines.append("=" * 62)
+lines.append("BLOCK 5 — AUC COMPARISON RESULTS")
+lines.append("=" * 62)
+lines.append(f"  Source files:")
+lines.append(f"    Gates  : gate_assignments.tsv  ({pre_merge:,} genes)")
+lines.append(f"    Matrix : binary_matrix.csv      ({len(mat):,} genes)")
+lines.append(f"    Merged : {post_merge:,} genes  |  Clean: {len(df_clean):,} genes")
+lines.append(f"  Train / Test : {len(idx_tr):,} / {len(idx_te):,}")
+lines.append(f"  Expressed (test) : {y[idx_te].mean()*100:.1f}%")
+lines.append("")
+lines.append(f"  Model 1 (individual marks)   AUC = {auc_marks:.4f}")
+lines.append(f"  Model 2 (gate type)          AUC = {auc_gate:.4f}")
+lines.append(f"  Model 3 (complexity score)   AUC = {auc_compl:.4f}")
+lines.append("")
+lines.append(f"  Gate AUC − Marks AUC = {delta:+.4f}")
+lines.append("")
+
+if gate_wins:
+    lines.append("  RESULT: Gate type model OUTPERFORMS individual marks.")
+    lines.append("  → Claim supported: gate assignments capture regulatory logic")
+    lines.append("    not reducible to individual mark presence/absence.")
+    lines.append("  → This is your Table 1 claim.")
+else:
+    lines.append("  RESULT: Individual marks model matches or outperforms gate type.")
+    lines.append("  → Possible interpretations:")
+    lines.append("    1. Gate boundaries need refinement (revisit thresholds).")
+    lines.append("    2. Categorical gate labels may collapse useful continuous signal.")
+    if auc_compl > auc_marks:
+        lines.append("    3. Model 3 (complexity) > Model 1 → reframe paper claim as:")
+        lines.append("       'Epigenetic complexity scores outperform individual marks'")
+        lines.append("       rather than 'gate type assignments outperform marks'.")
+
+lines.append("")
+lines.append("=" * 62)
+
+output = "\n".join(lines)
+print(output)
+
+with open(OUT_FILE, "w", encoding="utf-8") as fh:
+    fh.write(output)
+print(f"Report saved: {OUT_FILE}")

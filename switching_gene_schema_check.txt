@@ -1,0 +1,52 @@
+=== Switching-Gene Schema Check ===
+(Run this first — do not assume columns before reading this.)
+
+--- Current comparison CSV: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_gene_auc_comparison.csv ---
+Shape (full file): (4, 5)
+Columns: ['cell_line', 'model_type', 'subset_auc', 'genome_wide_auc', 'subset_n']
+Dtypes:
+cell_line              str
+model_type             str
+subset_auc         float64
+genome_wide_auc    float64
+subset_n             int64
+First 5 rows:
+  cell_line  model_type  subset_auc  genome_wide_auc  subset_n
+0   GM12878   gate_type      0.9753           0.9864      7429
+1   GM12878  marks_only      0.8526           0.7974      7429
+2      K562   gate_type      0.9957           0.9986      7429
+3      K562  marks_only      0.6096           0.7535      7429
+
+--- Annotated switching genes TSV: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_genes_annotated_v1.tsv ---
+Shape (full file): (7474, 6)
+Columns: ['gene', 'gene_name', 'gate_type_GM12878', 'gate_type_K562', 'functional_category', 'cosmic_census_flag']
+Dtypes:
+gene                   str
+gene_name              str
+gate_type_GM12878      str
+gate_type_K562         str
+functional_category    str
+cosmic_census_flag     str
+First 3 rows:
+     gene gene_name gate_type_GM12878 gate_type_K562 functional_category cosmic_census_flag
+0   SCYL3     SCYL3        SIMPLE_AND   INCONSISTENT             unknown                 no
+1     FGR       FGR        SIMPLE_AND   INCONSISTENT    kinase/signaling                 no
+2  NIPAL3    NIPAL3         SIMPLE_OR     SIMPLE_AND             unknown                 no
+
+--- Candidate switching genes TSV: C:\Users\jamoo\Downloads\LOGIC CIRCUITS\switching_genes_v1.tsv ---
+Shape (full file): (7474, 8)
+Columns: ['gene_id', 'gene_name', 'gate_type_GM12878', 'gate_type_K562', 'switch_direction', 'GM12878_expression', 'K562_expression', 'replicate_check']
+Dtypes:
+gene_id                   str
+gene_name                 str
+gate_type_GM12878         str
+gate_type_K562            str
+switch_direction          str
+GM12878_expression    float64
+K562_expression       float64
+replicate_check           str
+First 3 rows:
+           gene_id gene_name gate_type_GM12878 gate_type_K562 switch_direction  GM12878_expression  K562_expression                     replicate_check
+0  ENSG00000000457     SCYL3        SIMPLE_AND   INCONSISTENT          AND→INC                 NaN              NaN  NOT_EVALUATED_consensus_calls_only
+1  ENSG00000000938       FGR        SIMPLE_AND   INCONSISTENT          AND→INC                 NaN              NaN  NOT_EVALUATED_consensus_calls_only
+2  ENSG00000001461    NIPAL3         SIMPLE_OR     SIMPLE_AND           OR→AND                 NaN              NaN  NOT_EVALUATED_consensus_calls_only

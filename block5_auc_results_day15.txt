@@ -1,0 +1,31 @@
+======================================================================
+DAY 15 — AUC COMPARISON RESULTS, GM12878 vs K562
+======================================================================
+
+--- GM12878 ---
+  Merged : 56,625 / 56,625 genes
+  Train / Test : 17,969 / 4,493
+  Expressed (test) : 54.8%
+  Model 1 (individual marks)   AUC = 0.7974
+  Model 2 (gate type)          AUC = 0.9864
+  Model 3 (complexity score)   AUC = 0.6836
+  Gate AUC - Marks AUC = +0.1890
+  RESULT: Gate type model outperforms individual marks.
+
+--- K562 ---
+  Merged : 62,710 / 62,710 genes
+  Train / Test : 18,512 / 4,629
+  Expressed (test) : 30.3%
+  Model 1 (individual marks)   AUC = 0.7535
+  Model 2 (gate type)          AUC = 0.9986
+  Model 3 (complexity score)   AUC = 0.7635
+  Gate AUC - Marks AUC = +0.2452
+  RESULT: Gate type model outperforms individual marks.
+
+--- Cross-line comparison ---
+  GM12878 gate-model advantage : +0.1890
+  K562    gate-model advantage : +0.2452
+  → Gate framework's predictive advantage over individual marks
+    is preserved or larger in K562 relative to GM12878.
+
+======================================================================

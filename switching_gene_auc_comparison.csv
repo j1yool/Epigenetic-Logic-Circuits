@@ -1,0 +1,5 @@
+cell_line,model_type,subset_auc,genome_wide_auc,subset_n
+GM12878,gate_type,0.9753,0.9864,7429
+GM12878,marks_only,0.8526,0.7974,7429
+K562,gate_type,0.9957,0.9986,7429
+K562,marks_only,0.6096,0.7535,7429

@@ -1,0 +1,28 @@
+import requests
+import os
+
+ACCESSIONS = {
+    "H3K4me3": "ENCFF602ALN",
+    "H3K27ac": "ENCFF367KIF",
+    "H3K4me1": "ENCFF378FBA",
+    "H3K27me3": "ENCFF778CPR",
+    "H3K9me3": "ENCFF833BJA",
+    "RNAseq":  "ENCFF680ZFZ",
+}
+
+BASE_URL = "https://www.encodeproject.org/files/{acc}/@@download/{acc}.bed.gz"
+RAW_DIR = "data/raw/"
+os.makedirs(RAW_DIR, exist_ok=True)
+
+for mark, acc in ACCESSIONS.items():
+    url = BASE_URL.format(acc=acc)
+    out = os.path.join(RAW_DIR, f"{mark}_{acc}.bed.gz")
+    if os.path.exists(out):
+        print(f"Already have {mark}, skipping")
+        continue
+    print(f"Downloading {mark}...")
+    response = requests.get(url, stream=True)
+    with open(out, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+    print(f"Done: {mark}")

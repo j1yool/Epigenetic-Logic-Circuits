@@ -1,0 +1,8 @@
+data/
+*.gtf
+*.gtf.gz
+*.tar
+*.bed.gz
+__pycache__/
+*.pyc
+full_genome_gene_pool_biomart_v1.csv.txt

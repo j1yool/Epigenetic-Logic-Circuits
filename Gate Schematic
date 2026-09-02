@@ -1,0 +1,156 @@
+"""
+gate_schematic.py — v3 FINAL
+Day 20 — Epigenetic Logic Circuits — Figure 1 schematic
+"""
+print(">>> RUNNING gate_schematic.py v3 FINAL <<<")
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import pandas as pd
+
+PROJECT_ROOT = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+GATE_ASSIGNMENTS_PATH = os.path.join(PROJECT_ROOT, "data", "gate_assignments_named.tsv")
+BINARY_MATRIX_PATH = os.path.join(PROJECT_ROOT, "data", "binary_matrix.csv")
+OUTPUT_PATH = os.path.join(PROJECT_ROOT, "figures", "gate_framework_schematic.png")
+
+print(f">>> Script location: {os.path.abspath(__file__)}")
+
+MARK_A = "H3K4me3"
+MARK_B = "H3K27ac"
+EXPR_COL = "expressed"
+
+GATE_SYMBOLS = {"AND": "\u2227", "OR": "\u2228", "XOR": "\u2295", "NOT": "\u00ac"}
+GATE_ORDER = ["AND", "OR", "XOR", "NOT"]
+GATE_LABEL_MAP = {"AND": "SIMPLE_AND", "OR": "SIMPLE_OR", "XOR": "BIVALENT", "NOT": "REPRESSED"}
+
+ACTIVE_COLOR = "#2E7D32"
+INACTIVE_COLOR = "#B0BEC5"
+PANEL_BG = "#FAFAFA"
+TEXT_COLOR = "#1A1A1A"
+
+
+def load_data():
+    gates = pd.read_csv(GATE_ASSIGNMENTS_PATH, sep="\t")
+    marks = pd.read_csv(BINARY_MATRIX_PATH, index_col=0)
+    marks.index.name = "gene_id"
+    marks = marks.reset_index()
+    merged = gates.merge(marks, on="gene_id", how="inner")
+    print(f">>> Post-merge row count: {len(merged)}")
+    return merged
+
+
+def select_example_per_gate(merged):
+    examples = {}
+    for gate in GATE_ORDER:
+        pipeline_label = GATE_LABEL_MAP[gate]
+        subset = merged[merged["gate_type"] == pipeline_label].copy()
+        print(f">>> {gate} ({pipeline_label}): {len(subset)} total rows, "
+              f"{subset['gene_name'].notna().sum()} with gene_name")
+
+        if subset.empty:
+            examples[gate] = None
+            continue
+
+        named = subset[subset["gene_name"].notna() & (subset["gene_name"].astype(str).str.strip() != "")]
+        pool = named if not named.empty else subset
+
+        if gate == "AND":
+            best = pool[(pool[MARK_A] == 1) & (pool[MARK_B] == 1) & (pool[EXPR_COL] == 1)]
+        elif gate in ("OR", "XOR"):
+            best = pool[(((pool[MARK_A] == 1) & (pool[MARK_B] == 0)) |
+                         ((pool[MARK_A] == 0) & (pool[MARK_B] == 1))) & (pool[EXPR_COL] == 1)]
+        elif gate == "NOT":
+            best = pool[pool[EXPR_COL] == 0]
+        else:
+            best = pool
+
+        final_pool = best if not best.empty else pool
+
+        if "complexity_score" in final_pool.columns and final_pool["complexity_score"].notna().any():
+            final_pool = final_pool.sort_values("complexity_score")
+
+        examples[gate] = final_pool.iloc[0]
+    return examples
+
+
+def draw_truth_icon(ax, mark_a_val, mark_b_val, expr_val, x0, y0, size=0.12):
+    box_w, box_h = size, size
+    gap = size * 0.6
+    for val, label, bx in [(mark_a_val, MARK_A, x0), (mark_b_val, MARK_B, x0 + box_w + gap)]:
+        color = ACTIVE_COLOR if val == 1 else INACTIVE_COLOR
+        ax.add_patch(mpatches.FancyBboxPatch((bx, y0), box_w, box_h,
+            boxstyle="round,pad=0.01,rounding_size=0.015", linewidth=1.2,
+            edgecolor=TEXT_COLOR, facecolor=color, transform=ax.transAxes, zorder=3))
+        ax.text(bx + box_w / 2, y0 - 0.04, label, transform=ax.transAxes,
+                 ha="center", va="top", fontsize=7.5, color=TEXT_COLOR)
+    arrow_x0 = x0 + 2 * box_w + gap + 0.02
+    ax.annotate("", xy=(arrow_x0 + 0.06, y0 + box_h / 2), xytext=(arrow_x0, y0 + box_h / 2),
+                xycoords=ax.transAxes, textcoords=ax.transAxes,
+                arrowprops=dict(arrowstyle="->", color=TEXT_COLOR, lw=1.3))
+    expr_color = ACTIVE_COLOR if expr_val == 1 else INACTIVE_COLOR
+    expr_x = arrow_x0 + 0.08
+    ax.add_patch(mpatches.FancyBboxPatch((expr_x, y0), box_w, box_h,
+        boxstyle="round,pad=0.01,rounding_size=0.015", linewidth=1.4,
+        edgecolor=TEXT_COLOR, facecolor=expr_color, transform=ax.transAxes, zorder=3))
+    ax.text(expr_x + box_w / 2, y0 - 0.04, "Expr.", transform=ax.transAxes,
+             ha="center", va="top", fontsize=7.5, color=TEXT_COLOR)
+
+
+def draw_panel(ax, gate, example):
+    ax.set_facecolor(PANEL_BG)
+    ax.set_xticks([]); ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#CCCCCC")
+    symbol = GATE_SYMBOLS[gate]
+    ax.text(0.05, 0.92, f"{gate}  ({symbol})", transform=ax.transAxes,
+             fontsize=15, fontweight="bold", color=TEXT_COLOR, va="top")
+    if example is None:
+        ax.text(0.5, 0.5, f"No genes assigned to {gate}", transform=ax.transAxes,
+                 ha="center", va="center", fontsize=10, color="#B00020", style="italic")
+        return
+    mark_a_val, mark_b_val, expr_val = int(example[MARK_A]), int(example[MARK_B]), int(example[EXPR_COL])
+    gene_name, gene_id = example["gene_name"], example["gene_id"]
+    draw_truth_icon(ax, mark_a_val, mark_b_val, expr_val, x0=0.08, y0=0.55, size=0.13)
+    ax.text(0.08, 0.30, f"Example: {gene_name}\n({gene_id})", transform=ax.transAxes,
+             fontsize=10.5, fontweight="bold", color=TEXT_COLOR)
+    ax.text(0.08, 0.15, f"{MARK_A}={mark_a_val}, {MARK_B}={mark_b_val} → expressed={expr_val}",
+             transform=ax.transAxes, fontsize=9, color="#444444")
+
+
+def main():
+    merged = load_data()
+    examples = select_example_per_gate(merged)
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    fig.suptitle("Figure 1. Epigenetic Logic Gate Framework\n"
+                 "Boolean logic gates in histone-mark space, illustrated with real gene examples",
+                 fontsize=13, fontweight="bold", y=0.98)
+    for ax, gate in zip(axes.flatten(), GATE_ORDER):
+        draw_panel(ax, gate, examples[gate])
+    legend_elements = [
+        mpatches.Patch(facecolor=ACTIVE_COLOR, edgecolor=TEXT_COLOR, label="Mark present / gene expressed"),
+        mpatches.Patch(facecolor=INACTIVE_COLOR, edgecolor=TEXT_COLOR, label="Mark absent / gene not expressed"),
+    ]
+    fig.legend(handles=legend_elements, loc="lower center", ncol=2, frameon=False,
+               fontsize=9, bbox_to_anchor=(0.5, 0.01))
+    plt.tight_layout(rect=[0, 0.05, 1, 0.94])
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    fig.savefig(OUTPUT_PATH, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {OUTPUT_PATH}")
+    for gate in GATE_ORDER:
+        ex = examples[gate]
+        if ex is None:
+            print(f"  {gate}: NO EXAMPLE FOUND")
+        else:
+            print(f"  {gate}: {ex['gene_name']} ({ex['gene_id']})")
+
+
+if __name__ == "__main__":
+    main()

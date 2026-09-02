@@ -1,0 +1,156 @@
+"""
+K562 Pipeline - Step 1: Build Binary Feature Matrix
+Mirrors GM12878 pipeline. GRCh38, six histone marks + RNA-seq.
+Update ACCESSIONS dict with confirmed ENCODE file accessions before running.
+"""
+
+import pandas as pd
+import numpy as np
+import subprocess
+import os
+
+# ── CONFIG ──────────────────────────────────────────────────────────────────
+PROJECT_ROOT = r"C:\Users\jamoo\Downloads\LOGIC CIRCUITS"
+DATA_DIR     = os.path.join(PROJECT_ROOT, "data", "k562")
+GTF_PATH     = os.path.join(PROJECT_ROOT, "data", "Homo_sapiens.GRCh38.109.gtf")
+OUT_MATRIX   = os.path.join(DATA_DIR, "k562_binary_matrix.csv")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ── FILL THESE IN after confirming on ENCODE portal ─────────────────────────
+ACCESSIONS = {
+    "H3K4me3":  "FILL_IN",
+    "H3K27ac":  "FILL_IN",
+    "H3K4me1":  "FILL_IN",
+    "H3K27me3": "FILL_IN",
+    "H3K9me3":  "FILL_IN",
+    "RNA_seq":  "FILL_IN",
+}
+
+MARK_FILES = {
+    "H3K4me3":  os.path.join(DATA_DIR, "H3K4me3.bed"),
+    "H3K27ac":  os.path.join(DATA_DIR, "H3K27ac.bed"),
+    "H3K4me1":  os.path.join(DATA_DIR, "H3K4me1.bed"),
+    "H3K27me3": os.path.join(DATA_DIR, "H3K27me3.bed"),
+    "H3K9me3":  os.path.join(DATA_DIR, "H3K9me3.bed"),
+}
+RNA_FILE = os.path.join(DATA_DIR, "rna_seq_quantifications.tsv")
+
+TPM_THRESHOLD = 1.0  # binary expression cutoff
+
+# ── STEP 1: Parse gene TSSs from GTF ────────────────────────────────────────
+def parse_gtf_genes(gtf_path):
+    """Extract gene_id, chr, TSS (±2kb window), strand from GTF."""
+    records = []
+    with open(gtf_path) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            fields = line.strip().split("\t")
+            if fields[2] != "gene":
+                continue
+            chrom  = "chr" + fields[0] if not fields[0].startswith("chr") else fields[0]            
+            start  = int(fields[3])
+            end    = int(fields[4])
+            strand = fields[6]
+            attrs  = fields[8]
+
+            gene_id = ""
+            for attr in attrs.split(";"):
+                attr = attr.strip()
+                if attr.startswith("gene_id"):
+                    gene_id = attr.split('"')[1]
+                    break
+
+            tss = start if strand == "+" else end
+            win_start = max(0, tss - 2000)
+            win_end   = tss + 2000
+
+            records.append({
+                "gene_id": gene_id,
+                "chrom":   chrom,
+                "tss_start": win_start,
+                "tss_end":   win_end,
+            })
+
+    return pd.DataFrame(records).drop_duplicates("gene_id")
+
+
+# ── STEP 2: Overlap peaks with TSS windows ──────────────────────────────────
+def mark_overlap(genes_df, bed_path, mark_name):
+    """Return binary Series: 1 if gene TSS window overlaps any peak."""
+    peaks = pd.read_csv(
+        bed_path, sep="\t", header=None, usecols=[0, 1, 2],
+        names=["chrom", "peak_start", "peak_end"]
+    )
+    result = {}
+    peaks_by_chrom = {c: g for c, g in peaks.groupby("chrom")}
+
+    for _, row in genes_df.iterrows():
+        chrom = row["chrom"]
+        if chrom not in peaks_by_chrom:
+            result[row["gene_id"]] = 0
+            continue
+        cp = peaks_by_chrom[chrom]
+        overlaps = cp[
+            (cp["peak_start"] < row["tss_end"]) &
+            (cp["peak_end"]   > row["tss_start"])
+        ]
+        result[row["gene_id"]] = 1 if len(overlaps) > 0 else 0
+
+    return pd.Series(result, name=mark_name)
+
+
+# ── STEP 3: Parse RNA-seq TPM → binary expression ───────────────────────────
+def parse_rna(rna_path, genes_df, threshold=TPM_THRESHOLD):
+    rna = pd.read_csv(rna_path, sep="\t")
+    print("RNA columns:", rna.columns.tolist())
+
+    gene_col = "gene_id"
+    tpm_col  = "TPM"
+
+    rna = rna[[gene_col, tpm_col]].copy()
+    rna["gene_id"] = rna[gene_col].str.split(".").str[0]
+    rna = rna.groupby("gene_id")[tpm_col].max()  # collapse duplicates
+    expressed = (rna >= threshold).astype(int)
+    expressed.name = "expressed"
+
+    return expressed
+
+
+# ── MAIN ─────────────────────────────────────────────────────────────────────
+def main():
+    print("Parsing GTF...")
+    genes = parse_gtf_genes(GTF_PATH)
+    print(f"  {len(genes):,} genes parsed")
+
+    print("Building histone mark columns...")
+    mark_series = []
+    for mark, bed_path in MARK_FILES.items():
+        if not os.path.exists(bed_path):
+            print(f"  [MISSING] {mark}: {bed_path} — download before running")
+            continue
+        print(f"  Processing {mark}...")
+        s = mark_overlap(genes, bed_path, mark)
+        mark_series.append(s)
+
+    print("Parsing RNA-seq...")
+    if os.path.exists(RNA_FILE):
+        expr = parse_rna(RNA_FILE, genes)
+    else:
+        print(f"  [MISSING] RNA file: {RNA_FILE}")
+        expr = pd.Series(np.nan, index=genes["gene_id"], name="expressed")
+
+    # Assemble matrix
+    matrix = genes.set_index("gene_id")
+    for s in mark_series:
+        matrix[s.name] = s
+    matrix["expressed"] = expr
+
+    matrix.reset_index().to_csv(OUT_MATRIX, index=False)
+    print(f"\nMatrix saved: {OUT_MATRIX}")
+    print(matrix.describe())
+
+
+if __name__ == "__main__":
+    main()

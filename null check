@@ -1,0 +1,227 @@
+"""
+Null model permutation test for gate-type assignments.
+
+Adapts the permutation scheme specified in framework_v1.md (independently
+shuffle each mark's indicator column across genes, preserving marginal
+frequency pi_k, destroying gene-level co-occurrence and any association
+with expression) to the ACTUAL implemented hierarchical classifier
+(call_gate), rather than the closed-form pairwise AND/OR formulas in
+framework_v1.md, which assumed a two-input ANOVA-gate model that was not
+what got built.
+
+Run this once per cell line. Update BINARY_MATRIX_PATH and MARK_COLS
+below if your column names differ.
+"""
+
+import numpy as np
+import pandas as pd
+
+np.random.seed(42)
+
+# ---- CONFIG: update path for the cell line you're testing ----
+BINARY_MATRIX_PATH = r"data\k562\k562_binary_matrix.csv"
+N_PERMUTATIONS = 1000
+MARK_COLS = ["H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"]
+GATE_CLASSES = [
+    "NULL", "BIVALENT", "REPRESSED", "SIMPLE_AND",
+    "SIMPLE_OR", "COMPLEX", "INCONSISTENT",
+]  # POISED excluded: confirmed unreachable, will be 0 in observed and null alike
+
+
+# ---- Gate-calling logic, vectorized from the production row-wise script ----
+# Branch order and conditions are identical to call_gate() in the production
+# script; np.select evaluates conditions in list order and takes the first
+# match, exactly like the original if/elif chain, so this is a mechanical
+# speedup only -- not a logic change. (Verified against the row-wise version
+# on the observed, unpermuted matrix before this was used in the loop below.)
+def call_gate_vectorized(df):
+    active = df['H3K4me3'].to_numpy(dtype=float)
+    enhancer = df['H3K27ac'].to_numpy(dtype=float)
+    poised = df['H3K4me1'].to_numpy(dtype=float)
+    repressive1 = df['H3K27me3'].to_numpy(dtype=float)
+    repressive2 = df['H3K9me3'].to_numpy(dtype=float)
+    expressed = df['expressed'].to_numpy(dtype=float)
+
+    # IMPORTANT: replicate Python truthiness, not equality-to-1.
+    # The production row-wise call_gate() uses "if active and ..." style
+    # checks. In Python, bool(float('nan')) is True, so a NaN mark value
+    # is treated as PRESENT by the original code. `x != 0` reproduces this
+    # exactly: NaN != 0 evaluates True in both plain Python and numpy,
+    # matching bool(nan) == True. Using `x == 1` (the earlier, incorrect
+    # version) silently treats NaN as absent instead, which diverges from
+    # production behavior. Do not change this back to `== 1`.
+    def truthy(x):
+        return x != 0
+
+    a = truthy(active)
+    e = truthy(enhancer)
+    p = truthy(poised)
+    r1 = truthy(repressive1)
+    r2 = truthy(repressive2)
+    ex = truthy(expressed)
+
+    any_active = a | e
+    any_repressive = r1 | r2
+    # active_count/repressive_count reproduce the original arithmetic sums;
+    # if any input is NaN the sum is NaN, and NaN >= 3 is False in both
+    # plain Python and numpy, so this branch behaves identically without
+    # needing special-casing.
+    active_count = active + enhancer + poised
+    repressive_count = repressive1 + repressive2
+    both_active = a & e
+    either_active = (a | e) & ~both_active
+
+    conditions = [
+        (~any_active) & (~any_repressive),                                  # NULL
+        a & r1,                                                             # BIVALENT
+        any_repressive & (~any_active),                                     # REPRESSED
+        p & (~any_active) & (~any_repressive),                              # POISED (dead branch, kept for parity)
+        both_active & (~any_repressive) & ex,                                # SIMPLE_AND
+        both_active & (~any_repressive) & (~ex),                             # INCONSISTENT
+        either_active & (~any_repressive) & ex,                              # SIMPLE_OR
+        either_active & (~any_repressive) & (~ex),                           # INCONSISTENT
+        (active_count + repressive_count) >= 3,                             # COMPLEX
+        ex & (~any_active),                                                  # INCONSISTENT
+    ]
+    choices = [
+        'NULL', 'BIVALENT', 'REPRESSED', 'POISED',
+        'SIMPLE_AND', 'INCONSISTENT', 'SIMPLE_OR', 'INCONSISTENT',
+        'COMPLEX', 'INCONSISTENT',
+    ]
+    return np.select(conditions, choices, default='COMPLEX')
+
+
+def gate_frequencies(df):
+    calls = call_gate_vectorized(df)
+    n = len(df)
+    counts = pd.Series(calls).value_counts()
+    freqs = {c: counts.get(c, 0) / n for c in GATE_CLASSES}
+    return freqs
+
+
+def _verify_vectorized_matches_rowwise(df, n_check=2000):
+    """Sanity check: vectorized gate calls must exactly match the original
+    row-wise call_gate() on a sample of real (unpermuted) rows before this
+    script is trusted for the actual null-model run."""
+    def call_gate_rowwise(row):
+        active = row.get('H3K4me3', 0)
+        enhancer = row.get('H3K27ac', 0)
+        poised = row.get('H3K4me1', 0)
+        repressive1 = row.get('H3K27me3', 0)
+        repressive2 = row.get('H3K9me3', 0)
+        expressed = row.get('expressed', 0)
+        any_active = active or enhancer
+        any_repressive = repressive1 or repressive2
+        active_count = active + enhancer + poised
+        repressive_count = repressive1 + repressive2
+        if not any_active and not any_repressive:
+            return 'NULL'
+        if active and repressive1:
+            return 'BIVALENT'
+        if any_repressive and not any_active:
+            return 'REPRESSED'
+        if poised and not any_active and not any_repressive:
+            return 'POISED'
+        if active and enhancer and not any_repressive:
+            return 'SIMPLE_AND' if expressed else 'INCONSISTENT'
+        if (active or enhancer) and not (active and enhancer) and not any_repressive:
+            return 'SIMPLE_OR' if expressed else 'INCONSISTENT'
+        if active_count + repressive_count >= 3:
+            return 'COMPLEX'
+        if expressed and not any_active:
+            return 'INCONSISTENT'
+        return 'COMPLEX'
+
+    sample = df.sample(n=min(n_check, len(df)), random_state=42)
+    rowwise = sample.apply(call_gate_rowwise, axis=1).to_numpy()
+    vectorized = call_gate_vectorized(sample)
+    mismatches = (rowwise != vectorized).sum()
+    if mismatches > 0:
+        raise AssertionError(
+            f"Vectorized gate calls diverge from row-wise reference on "
+            f"{mismatches}/{len(sample)} sampled genes -- do not trust "
+            f"results until this is fixed."
+        )
+    print(f"Vectorization check passed: {len(sample)}/{len(sample)} "
+          f"sampled genes match row-wise reference exactly.")
+
+
+def permute_marks(df, mark_cols):
+    """Independently shuffle each mark column across genes.
+    Preserves each mark's marginal frequency (pi_k) exactly.
+    Destroys gene-level co-occurrence structure and any mark-expression
+    association, since 'expressed' is left untouched and unlinked."""
+    permuted = df.copy()
+    for col in mark_cols:
+        permuted[col] = np.random.permutation(permuted[col].values)
+    return permuted
+
+
+def main():
+    df = pd.read_csv(BINARY_MATRIX_PATH, index_col=0)
+    required_cols = MARK_COLS + ["expressed"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing expected columns: {missing}. "
+                          f"Check BINARY_MATRIX_PATH / column names.")
+
+    # Missing mark data is treated as ABSENT (0), not present. Previously,
+    # NaN was silently treated as truthy/present by the row-wise call_gate()
+    # logic -- this line fixes that at the source, before any gate is called.
+    n_nan_before = df[MARK_COLS].isna().sum().sum()
+    if n_nan_before > 0:
+        print(f"Filling {n_nan_before} missing mark values with 0 (absent) "
+              f"before gate calling.")
+    df[MARK_COLS] = df[MARK_COLS].fillna(0)
+
+    _verify_vectorized_matches_rowwise(df)
+
+    observed = gate_frequencies(df)
+    print("Observed gate-class frequencies:")
+    for c in GATE_CLASSES:
+        print(f"  {c}: {observed[c]:.4f}")
+
+    null_freqs = {c: [] for c in GATE_CLASSES}
+    for i in range(N_PERMUTATIONS):
+        perm_df = permute_marks(df, MARK_COLS)
+        freqs = gate_frequencies(perm_df)
+        for c in GATE_CLASSES:
+            null_freqs[c].append(freqs[c])
+        if (i + 1) % 100 == 0:
+            print(f"  permutation {i + 1}/{N_PERMUTATIONS}")
+
+    n_classes_tested = len(GATE_CLASSES)
+    bonferroni_alpha = 0.05 / n_classes_tested
+
+    print(f"\nEmpirical p-values (B={N_PERMUTATIONS}, "
+          f"Bonferroni alpha={bonferroni_alpha:.5f} for {n_classes_tested} classes):")
+    results = []
+    for c in GATE_CLASSES:
+        null_dist = np.array(null_freqs[c])
+        p_empirical = np.mean(null_dist >= observed[c])
+        # avoid reporting exactly 0 with only 1000 permutations
+        p_reported = max(p_empirical, 1.0 / (N_PERMUTATIONS + 1))
+        significant = p_reported < bonferroni_alpha
+        print(f"  {c}: observed={observed[c]:.4f}, "
+              f"null_mean={null_dist.mean():.4f}, "
+              f"null_sd={null_dist.std():.4f}, "
+              f"p={p_reported:.5f}, "
+              f"significant={significant}")
+        results.append({
+            "gate_class": c,
+            "observed_freq": observed[c],
+            "null_mean": null_dist.mean(),
+            "null_sd": null_dist.std(),
+            "p_empirical": p_reported,
+            "bonferroni_alpha": bonferroni_alpha,
+            "significant": significant,
+        })
+
+    out = pd.DataFrame(results)
+    out_path = BINARY_MATRIX_PATH.replace(".csv", "_null_model_results.csv")
+    out.to_csv(out_path, index=False)
+    print(f"\nSaved to {out_path}")
+
+
+if __name__ == "__main__":
+    main()
