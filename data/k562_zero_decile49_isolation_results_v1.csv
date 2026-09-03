@@ -1,0 +1,6 @@
+condition,ks_stat,ks_p,n_switching,n_nonswitching,notes
+baseline_seed61,0.061381074168797956,2.6228006308231616e-11,6647,6647,Reproduces Day 61 exactly within 4 sig figs.
+condition_b_exclude_zero,0.010010537407797681,0.9912557897155483,3796,3796,ZERO stratum excluded from both groups; all nonzero deciles 0-9 retained
+condition_c_exclude_high,0.08706786171574904,7.16785135699527e-16,4686,4686,deciles 4-9 excluded from both groups; ZERO + deciles 0-3 retained
+condition_d_exclude_zero_and_high,0.020708446866485014,0.8264019257759847,1835,1835,ZERO and deciles 4-9 both excluded; ONLY deciles 0-3 retained
+condition_a_reseeded_exclude_low,0.08478802992518704,1.8229318208444317e-15,4812,4812,"Day 63 Condition A definition (exclude deciles 0-3, retain ZERO+4-9), rerun with RNG_SEED=61 instead of Day 63's seed=63 for direct cross-check comparability against Day 63's reported five-orders-of-magnitude-worse result. NOT equivalent to condition_d -- these are complements, not duplicates."
